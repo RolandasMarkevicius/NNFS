@@ -8,21 +8,19 @@ nnfs.init()
 class Layer:
     def __init__(self, nr_inputs, nr_neurons):
         self.weights = 0.01 * np.random.randn(nr_inputs, nr_neurons)
-        self.bias = np.zeros(nr_neurons)
+        self.bias = np.zeros((1, nr_neurons)) 
 
     def forward(self, inputs):
-        self.output = np.dot(self.weights, inputs) + self.bias
+        self.output = np.dot(inputs, self.weights) + self.bias
 
 class Activation:
     def forward(self, input):
-        self.output = np.max(0, input, axis=1, keepdims=True)
+        self.output = np.maximum(0, input)
 
 class Softmax:
     def forward(self, input):
-        negative_exponents = np.max(input) - input
-        self.output = input
-
-        pass
+        negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
+        self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
 
 #define the dataset
 x, y = spiral_data(samples=100, classes=3)
