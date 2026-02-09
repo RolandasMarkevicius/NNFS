@@ -22,9 +22,36 @@ class Softmax:
         negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
         self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
 
-class CCE_loss:
+class Loss:
+    def calculate(self, input, labels):
+        loss, accuracy = self.forward(input, labels)
+        avg_loss = np.mean(loss)
+
+        avg_accuracy = np.mean(accuracy)
+
+        return avg_loss, avg_accuracy
+    
+        
+class CCE_loss(Loss):
     def forward(self, input, labels):
-        self.output = np.mean(-np.log(input[range(len(input)), labels]))
+        np_labels = np.array(labels)
+        input_clipped = np.clip(input, 1e-7, 1-1e-7)
+        largest_index = np.argmax(input_clipped, axis=1)
+
+        if len(np_labels.shape) == 1:
+            yhat = input_clipped[range(len(input_clipped)), np_labels]
+            accuracy = largest_index == np_labels
+
+        elif len(np_labels.shape) == 2:
+            yhat = np.sum((input_clipped * np_labels), axis=1) #what does keep dims do?
+            accuracy = largest_index == np.argmax(np_labels, axis=1)
+
+        else:
+            print('this did not work')
+
+        loss = -np.log(yhat)
+
+        return loss, accuracy
 
 #define the dataset
 x, y = spiral_data(samples=100, classes=3)
@@ -34,7 +61,7 @@ l1 = Layer(2,3)
 l1_relu = Activation()
 l2 = Layer(3,3)
 l2_softmax = Softmax()
-loss = CCE_loss()
+loss_function = CCE_loss()
 
 #forward pass
 l1.forward(x)
@@ -44,8 +71,8 @@ l2.forward(l1_relu.output)
 l2_softmax.forward(l2.output)
 
 #loss
-loss.forward(l2_softmax.output, y)
-
+loss = loss_function.calculate(l2_softmax.output, y)
+print(loss)
 
 #outputs
-print(loss.output)
+# print(loss.output)
