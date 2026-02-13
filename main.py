@@ -11,11 +11,25 @@ class Layer:
         self.bias = np.zeros((1, nr_neurons)) 
 
     def forward(self, inputs):
-        self.output = np.dot(inputs, self.weights) + self.bias
+        self.inputs = inputs
+        self.output = np.dot(self.inputs, self.weights) + self.bias
 
+    def backward(self, gradients):
+        #update the weights
+        self.weights += 0.01 * np.dot(self.inputs.T, gradients)
+
+        #update the bias
+        self.bias += 0.01 * np.sum(gradients)
+
+        #return outputs for further backpropagation
+        self.gradients = np.dot(gradients, self.weights.T)
+   
 class Activation:
     def forward(self, input):
         self.output = np.maximum(0, input)
+
+    def backward(self, gradients):
+        self.gradients = 1 if gradients >= 0 else 0
 
 class Softmax:
     def forward(self, input):
