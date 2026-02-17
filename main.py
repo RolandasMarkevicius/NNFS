@@ -16,20 +16,20 @@ class Layer:
 
     def backward(self, gradients):
         #update the weights
-        self.weights += 0.01 * np.dot(self.inputs.T, gradients)
-
+        self.d_weights = np.dot(self.inputs.T, gradients)
         #update the bias
-        self.bias += 0.01 * np.sum(gradients)
-
+        self.d_bias = np.sum(gradients, axis=0, keepdims=True)
         #return outputs for further backpropagation
         self.gradients = np.dot(gradients, self.weights.T)
    
 class Activation:
     def forward(self, input):
+        self.inputs = input
         self.output = np.maximum(0, input)
 
     def backward(self, gradients):
-        self.gradients = 1 if gradients >= 0 else 0
+        self.gradients = gradients.copy()
+        self.gradients[self.inputs <= 0] = 0 
 
 class Softmax:
     def forward(self, input):
@@ -44,7 +44,6 @@ class Loss:
         avg_accuracy = np.mean(accuracy)
 
         return avg_loss, avg_accuracy
-    
         
 class CCE_loss(Loss):
     def forward(self, input, labels):
@@ -67,6 +66,34 @@ class CCE_loss(Loss):
 
         return loss, accuracy
 
+class Combined_Softamx_and_CCE():
+    def __init__(self):
+        #initialise the softmax and cat cross entropy classes
+        self.softmax = Softmax()
+        self.loss = CCE_loss()
+
+    def forward(self, input, labels):
+        self.softmax.forward(input=input)
+        self.loss, self.accuracy = self.loss.calculate(input=self.softmax.output, labels=labels)
+        self.output = self.softmax.output
+
+    def backward(self, softmax_outputs, labels):
+        #combined partial derivative solves to: softmax outputs - true values
+        
+        #define sample count
+        self.sample_count = softmax_outputs.shape[0]
+
+        #adjust the shape of the true values to be not 1hot encoded
+        if len(labels.shape) == 2:
+            labels = np.argmax(labels, axis=1)
+
+        #if statement to manage true value shape
+        self.gradients = softmax_outputs.copy()
+        self.gradients[range(self.sample_count), labels] -= 1 #true values in this case is 1 so subtracting one for each sample in the batch
+
+        #noramlise gradients
+        self.gradients = self.gradients / self.sample_count
+
 #define the dataset
 x, y = spiral_data(samples=100, classes=3)
 
@@ -75,18 +102,27 @@ l1 = Layer(2,3)
 l1_relu = Activation()
 l2 = Layer(3,3)
 l2_softmax = Softmax()
-loss_function = CCE_loss()
+# loss_function = CCE_loss()
+smax_and_cce = Combined_Softamx_and_CCE()
 
 #forward pass
 l1.forward(x)
 l1_relu.forward(l1.output)
 
 l2.forward(l1_relu.output)
-l2_softmax.forward(l2.output)
+#l2_softmax.forward(l2.output) # sofmax no longer required as this is combined in the smax_and_cce joint implementation
+smax_and_cce.forward(l2.output, y)
 
 #loss
-loss = loss_function.calculate(l2_softmax.output, y)
-print(loss)
+loss, accracy = smax_and_cce.loss, smax_and_cce.accuracy
+print(smax_and_cce.output[:5])
+print(loss, accracy)
+
+#backwards pass
+smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
+l2.backward(gradients=smax_and_cce.gradients)
+l1_relu.backward(gradients=l2.gradients)
+l1.backward(gradients=l1_relu.gradients)
 
 #outputs
 # print(loss.output)
