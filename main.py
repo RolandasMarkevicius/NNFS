@@ -74,7 +74,7 @@ class Combined_Softamx_and_CCE():
 
     def forward(self, input, labels):
         self.softmax.forward(input=input)
-        self.loss, self.accuracy = self.loss.calculate(input=self.softmax.output, labels=labels)
+        self.loss_value, self.accuracy_value = self.loss.calculate(input=self.softmax.output, labels=labels)
         self.output = self.softmax.output
 
     def backward(self, softmax_outputs, labels):
@@ -94,35 +94,69 @@ class Combined_Softamx_and_CCE():
         #noramlise gradients
         self.gradients = self.gradients / self.sample_count
 
+class Optimizer():
+    def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
+        self.learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.decay = decay
+        self.memory = memory
+        self.itterations = 0
+
+    def pre_optimize(self):
+        #setup initial learning rate
+        if self.decay:
+            self.current_learning_rate = self.learning_rate / (1 + (self.decay * self.itterations))
+
+    def optimize(self, layer):
+        #optimize the weights and biases
+        layer.weights -= self.current_learning_rate * layer.d_weights
+        layer.bias -= self.current_learning_rate * layer.d_bias
+
+    def post_optimize(self):
+        self.itterations += 1
+
 #define the dataset
 x, y = spiral_data(samples=100, classes=3)
 
 #network architecture
-l1 = Layer(2,3)
+l1 = Layer(2,64)
 l1_relu = Activation()
-l2 = Layer(3,3)
+l2 = Layer(64,3)
 l2_softmax = Softmax()
+
 # loss_function = CCE_loss()
 smax_and_cce = Combined_Softamx_and_CCE()
 
-#forward pass
-l1.forward(x)
-l1_relu.forward(l1.output)
+#optimizer
+optimizer = Optimizer(learning_rate=1, decay=0.001)
 
-l2.forward(l1_relu.output)
-#l2_softmax.forward(l2.output) # sofmax no longer required as this is combined in the smax_and_cce joint implementation
-smax_and_cce.forward(l2.output, y)
+for i in range(10000):
 
-#loss
-loss, accracy = smax_and_cce.loss, smax_and_cce.accuracy
-print(smax_and_cce.output[:5])
-print(loss, accracy)
+    #forward pass
+    l1.forward(x)
+    l1_relu.forward(l1.output)
 
-#backwards pass
-smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
-l2.backward(gradients=smax_and_cce.gradients)
-l1_relu.backward(gradients=l2.gradients)
-l1.backward(gradients=l1_relu.gradients)
+    l2.forward(l1_relu.output)
+    #l2_softmax.forward(l2.output) # sofmax no longer required as this is combined in the smax_and_cce joint implementation
+    smax_and_cce.forward(l2.output, y)
+
+    #loss
+    loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
+    # print(smax_and_cce.output[:5])
+    print(loss, accracy)
+
+    #backwards pass
+    smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
+    l2.backward(gradients=smax_and_cce.gradients)
+    l1_relu.backward(gradients=l2.gradients)
+    l1.backward(gradients=l1_relu.gradients)
+
+    #optimization
+    optimizer.pre_optimize()
+    optimizer.optimize(layer=l2)
+    optimizer.optimize(layer=l1)
+    optimizer.post_optimize()
+    
 
 #outputs
 # print(loss.output)
