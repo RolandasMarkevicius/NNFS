@@ -103,14 +103,28 @@ class Optimizer():
         self.itterations = 0
 
     def pre_optimize(self):
-        #setup initial learning rate
         if self.decay:
             self.current_learning_rate = self.learning_rate / (1 + (self.decay * self.itterations))
 
     def optimize(self, layer):
-        #optimize the weights and biases
-        layer.weights -= self.current_learning_rate * layer.d_weights
-        layer.bias -= self.current_learning_rate * layer.d_bias
+        if self.memory:
+            #conditional for initialization (0 array for updated weights)
+            if not hasattr(layer, 'weight_memory'):
+                #create a new empty array of 0's in the shape of the weights and biases
+                layer.weight_memory = np.zeros_like(layer.d_weights)
+                layer.bias_memory = np.zeros_like(layer.d_bias)
+
+            layer.weight_memory = (layer.weight_memory * self.memory) + ((1 - self.memory) * layer.d_weights)
+            self.weight_updates = layer.weight_memory
+            layer.bias_memory = (layer.bias_memory * self.memory) + ((1 - self.memory) * layer.d_bias)
+            self.bias_updates = layer.bias_memory
+            
+            layer.weights -= self.current_learning_rate * self.weight_updates
+            layer.bias -= self.current_learning_rate * self.bias_updates
+
+        else:
+            layer.weights -= self.current_learning_rate * layer.d_weights
+            layer.bias -= self.current_learning_rate * layer.d_bias
 
     def post_optimize(self):
         self.itterations += 1
@@ -128,9 +142,9 @@ l2_softmax = Softmax()
 smax_and_cce = Combined_Softamx_and_CCE()
 
 #optimizer
-optimizer = Optimizer(learning_rate=1, decay=0.001)
+optimizer = Optimizer(learning_rate=1, decay=0.001, memory=0.9)
 
-for i in range(10000):
+for i in range(10001):
 
     #forward pass
     l1.forward(x)
@@ -153,8 +167,8 @@ for i in range(10000):
 
     #optimization
     optimizer.pre_optimize()
-    optimizer.optimize(layer=l2)
     optimizer.optimize(layer=l1)
+    optimizer.optimize(layer=l2)
     optimizer.post_optimize()
     
 
