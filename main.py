@@ -94,7 +94,7 @@ class Combined_Softamx_and_CCE():
         #noramlise gradients
         self.gradients = self.gradients / self.sample_count
 
-class Optimizer():
+class Optimizer_SGD_with_momentum():
     def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -129,6 +129,108 @@ class Optimizer():
     def post_optimize(self):
         self.itterations += 1
 
+class Optimizer_Adagrad():
+    def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001):
+        self.learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.decay = decay
+        self.itterations = 0
+        self.eps = eps
+
+    def pre_optimize(self):
+        if self.decay:
+            self.current_learning_rate = self.learning_rate / (1 + (self.decay * self.itterations))
+
+    def optimize(self, layer):
+        #conditional for initialization (0 array for updated weights)
+        if not hasattr(layer, 'weight_cache'):
+            #create a new empty array of 0's in the shape of the weights and biases
+            layer.weight_cache = np.zeros_like(layer.d_weights)
+            layer.bias_cache = np.zeros_like(layer.d_bias)
+
+        layer.weight_cache += layer.d_weights ** 2
+        layer.bias_cache += layer.d_bias ** 2
+
+        layer.weights -= self.current_learning_rate / (np.sqrt(layer.weight_cache) + self.eps) * layer.d_weights
+        layer.bias -= self.current_learning_rate / (np.sqrt(layer.bias_cache) + self.eps) * layer.d_bias
+
+    def post_optimize(self):
+        self.itterations += 1
+
+class Optimizer_RMSProp():
+    def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001, beta=0.9):
+        self.learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.decay = decay
+        self.iterations = 0
+        self.eps = eps
+        self.beta = beta
+
+    def pre_optimize(self):
+        if self.decay:
+            self.current_learning_rate = self.learning_rate / (1 + (self.decay * self.iterations))
+
+    def optimize(self, layer):
+        #conditional for initialization (0 array for updated weights)
+        if not hasattr(layer, 'weight_cache'):
+            #create a new empty array of 0's in the shape of the weights and biases
+            layer.weight_cache = np.zeros_like(layer.weights)
+            layer.bias_cache = np.zeros_like(layer.bias)
+
+        layer.weight_cache = layer.weight_cache * self.beta + ((1 - self.beta) * (layer.d_weights ** 2))
+        layer.bias_cache = layer.bias_cache * self.beta + ((1- self.beta) * (layer.d_bias ** 2))
+
+        layer.weights -= self.current_learning_rate / (np.sqrt(layer.weight_cache) + self.eps) * layer.d_weights
+        layer.bias -= self.current_learning_rate / (np.sqrt(layer.bias_cache) + self.eps) * layer.d_bias
+
+    def post_optimize(self):
+        self.iterations += 1
+
+class Optimizer_Adam():
+    def __init__(self, learning_rate=1, decay=0.01, eps=1e-7, beta1=0.9, beta2=0.999):
+        self.learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.decay = decay
+        self.iterations = 0
+        self.eps = eps
+        self.beta1 = beta1
+        self.beta2 = beta2
+
+    def pre_optimize(self):
+        if self.decay:
+            self.current_learning_rate = self.learning_rate / (1 + (self.decay * self.iterations))
+
+    def optimize(self, layer):
+        #conditional for initialization (0 array for updated weights)
+        if not hasattr(layer, 'weight_cache'):
+            layer.weight_memory = np.zeros_like(layer.weights)
+            layer.bias_memory = np.zeros_like(layer.bias)
+
+            layer.weight_cache = np.zeros_like(layer.weights)
+            layer.bias_cache = np.zeros_like(layer.bias)
+
+        #get the weight memory
+        layer.weight_memory = (self.beta1 * layer.weight_memory) + (1 - self.beta1) * layer.d_weights
+        layer.corrected_weight_memory = layer.weight_memory / (1 - self.beta1 ** (self.iterations + 1))
+
+        #get the bias memory
+        layer.bias_memory = (self.beta1 * layer.bias_memory) + (1- self.beta1) * layer.d_bias
+        layer.corrected_bias_memory = layer.bias_memory / (1 - self.beta1 ** (self.iterations +1))
+
+        #get the weight change magnitude based on RMSprop
+        layer.weight_cache = layer.weight_cache * self.beta2 + ((1 - self.beta2) * (layer.d_weights ** 2))
+        layer.corrected_weight_cache = layer.weight_cache / (1 - self.beta2 ** (self.iterations + 1))
+
+        #get the bias change magnitude based on RMSprop
+        layer.bias_cache = layer.bias_cache * self.beta2 + ((1- self.beta2) * (layer.d_bias ** 2))
+        layer.corrected_bias_cache = layer.bias_cache / (1 - self.beta2 ** (self.iterations + 1))
+
+        layer.weights -= self.current_learning_rate / (np.sqrt(layer.corrected_weight_cache) + self.eps) * layer.corrected_weight_memory
+        layer.bias -= self.current_learning_rate / (np.sqrt(layer.corrected_bias_cache) + self.eps) * layer.corrected_bias_memory
+
+    def post_optimize(self):
+        self.iterations += 1
+
 #define the dataset
 x, y = spiral_data(samples=100, classes=3)
 
@@ -142,7 +244,7 @@ l2_softmax = Softmax()
 smax_and_cce = Combined_Softamx_and_CCE()
 
 #optimizer
-optimizer = Optimizer(learning_rate=1, decay=0.001, memory=0.9)
+optimizer = Optimizer_Adam(learning_rate=0.02, decay=1e-5, eps=1e-7, beta1=0.9, beta2=0.999)
 
 for i in range(10001):
 
