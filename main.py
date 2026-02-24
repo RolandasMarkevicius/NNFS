@@ -6,9 +6,14 @@ from nnfs.datasets import spiral_data
 nnfs.init()
 
 class Layer:
-    def __init__(self, nr_inputs, nr_neurons):
+    def __init__(self, nr_inputs, nr_neurons, l1_lambda_weights=0, l1_lambda_bias=0, l2_lambda_weights=0, l2_lambda_bias=0):
         self.weights = 0.01 * np.random.randn(nr_inputs, nr_neurons)
-        self.bias = np.zeros((1, nr_neurons)) 
+        self.bias = np.zeros((1, nr_neurons))
+
+        self.l1_lambda_weights = l1_lambda_weights
+        self.l2_lambda_weights = l2_lambda_weights
+        self.l1_lambda_bias = l1_lambda_bias
+        self.l2_lambda_bias = l2_lambda_bias
 
     def forward(self, inputs):
         self.inputs = inputs
@@ -17,8 +22,31 @@ class Layer:
     def backward(self, gradients):
         #update the weights
         self.d_weights = np.dot(self.inputs.T, gradients)
+
+        #update the weights with regularization
+        if self.l1_lambda_weights > 0:
+            d_l1_weights = np.ones_like(self.d_weights)
+            d_l1_weights[self.d_weights <= 0] = -1
+            self.d_weights += self.l1_lambda_weights * d_l1_weights #why are we summing this?
+
+        #update the weights with l2 regualrization
+        if self.l2_lambda_weights > 0:
+            d_l2_weights = self.l2_lambda_weights * 2 * self.weights
+            self.d_weights += d_l2_weights
+
         #update the bias
         self.d_bias = np.sum(gradients, axis=0, keepdims=True)
+
+        #update the bias with regularization
+        if self.l1_lambda_bias > 0:
+            d_l1_bias = np.ones_like(self.d_bias)
+            d_l1_bias[self.d_bias <= 0] = -1
+            self.d_bias += self.l1_lambda_bias * d_l1_bias
+
+        if self.l2_lambda_bias > 0:
+            d_l2_bias = self.l2_lambda_bias * 2 * self.bias
+            self.d_bias += d_l2_bias
+
         #return outputs for further backpropagation
         self.gradients = np.dot(gradients, self.weights.T)
    
@@ -39,11 +67,35 @@ class Softmax:
 class Loss:
     def calculate(self, input, labels):
         loss, accuracy = self.forward(input, labels)
+
         avg_loss = np.mean(loss)
 
         avg_accuracy = np.mean(accuracy)
 
         return avg_loss, avg_accuracy
+    
+    def regularization_loss(self, layer):
+        #l1_loss = sum of absolute value of weights/bias times lambda
+        
+        regularization_loss = 0
+
+        #l1_weights
+        if layer.l1_lambda_weights > 0:
+            regularization_loss += layer.l1_lambda_weights * np.sum(np.absolute(layer.weights))
+
+        #l1_bias
+        if layer.l1_lambda_bias > 0:
+            regularization_loss += layer.l1_lambda_bias * np.sum(np.absolute(layer.bias))
+        
+        #l2_weights
+        if layer.l2_lambda_weights > 0:
+            regularization_loss += layer.l2_lambda_weights * np.sum(layer.weights ** 2)
+
+        #l2_bias
+        if layer.l2_lambda_bias > 0:
+            regularization_loss += layer.l2_lambda_bias * np.sum(layer.bias ** 2)
+
+        return regularization_loss
         
 class CCE_loss(Loss):
     def forward(self, input, labels):
@@ -235,7 +287,7 @@ class Optimizer_Adam():
 x, y = spiral_data(samples=100, classes=3)
 
 #network architecture
-l1 = Layer(2,64)
+l1 = Layer(2,64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
 l1_relu = Activation()
 l2 = Layer(64,3)
 l2_softmax = Softmax()
@@ -244,8 +296,9 @@ l2_softmax = Softmax()
 smax_and_cce = Combined_Softamx_and_CCE()
 
 #optimizer
-optimizer = Optimizer_Adam(learning_rate=0.02, decay=1e-5, eps=1e-7, beta1=0.9, beta2=0.999)
+optimizer = Optimizer_Adam(learning_rate=0.02, decay=5e-7, eps=1e-7, beta1=0.9, beta2=0.999)
 
+#training loop
 for i in range(10001):
 
     #forward pass
@@ -253,13 +306,14 @@ for i in range(10001):
     l1_relu.forward(l1.output)
 
     l2.forward(l1_relu.output)
-    #l2_softmax.forward(l2.output) # sofmax no longer required as this is combined in the smax_and_cce joint implementation
     smax_and_cce.forward(l2.output, y)
 
     #loss
-    loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
-    # print(smax_and_cce.output[:5])
-    print(loss, accracy)
+    data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
+    regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+
+    loss = data_loss + regularization_loss
+    print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
 
     #backwards pass
     smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
@@ -273,6 +327,19 @@ for i in range(10001):
     optimizer.optimize(layer=l2)
     optimizer.post_optimize()
     
+#model validation
+x_test, y_test = spiral_data(samples=100, classes=3)
 
-#outputs
-# print(loss.output)
+#forward pass
+l1.forward(x_test)
+l1_relu.forward(l1.output)
+
+l2.forward(l1_relu.output)
+smax_and_cce.forward(l2.output, y_test)
+
+#loss
+data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
+regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+
+loss = data_loss + regularization_loss
+print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
