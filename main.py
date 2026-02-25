@@ -49,6 +49,17 @@ class Layer:
 
         #return outputs for further backpropagation
         self.gradients = np.dot(gradients, self.weights.T)
+
+class Dropout:
+    def __init__(self, dropout_rate):
+        self.dropout_rate = dropout_rate
+    
+    def forward(self, inputs):
+        self.binary_mask = np.random.binomial(1, self.dropout_rate, np.shape(inputs))
+        self.output = inputs * self.binary_mask / self.dropout_rate
+
+    def backward(self, gradients):
+        self.gradients = gradients * self.binary_mask / self.dropout_rate
    
 class Activation:
     def forward(self, input):
@@ -118,7 +129,7 @@ class CCE_loss(Loss):
 
         return loss, accuracy
 
-class Combined_Softamx_and_CCE():
+class Combined_Softamx_and_CCE:
     def __init__(self):
         #initialise the softmax and cat cross entropy classes
         self.softmax = Softmax()
@@ -146,7 +157,7 @@ class Combined_Softamx_and_CCE():
         #noramlise gradients
         self.gradients = self.gradients / self.sample_count
 
-class Optimizer_SGD_with_momentum():
+class Optimizer_SGD_with_momentum:
     def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -181,7 +192,7 @@ class Optimizer_SGD_with_momentum():
     def post_optimize(self):
         self.itterations += 1
 
-class Optimizer_Adagrad():
+class Optimizer_Adagrad:
     def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -209,7 +220,7 @@ class Optimizer_Adagrad():
     def post_optimize(self):
         self.itterations += 1
 
-class Optimizer_RMSProp():
+class Optimizer_RMSProp:
     def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001, beta=0.9):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -238,7 +249,7 @@ class Optimizer_RMSProp():
     def post_optimize(self):
         self.iterations += 1
 
-class Optimizer_Adam():
+class Optimizer_Adam:
     def __init__(self, learning_rate=1, decay=0.01, eps=1e-7, beta1=0.9, beta2=0.999):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -287,16 +298,17 @@ class Optimizer_Adam():
 x, y = spiral_data(samples=100, classes=3)
 
 #network architecture
-l1 = Layer(2,64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+l1 = Layer(2,512, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
 l1_relu = Activation()
-l2 = Layer(64,3)
+l1_dropout = Dropout(dropout_rate=0.9)
+l2 = Layer(512,3)
 l2_softmax = Softmax()
 
 # loss_function = CCE_loss()
 smax_and_cce = Combined_Softamx_and_CCE()
 
 #optimizer
-optimizer = Optimizer_Adam(learning_rate=0.02, decay=5e-7, eps=1e-7, beta1=0.9, beta2=0.999)
+optimizer = Optimizer_Adam(learning_rate=0.05, decay=5e-5, eps=1e-7, beta1=0.9, beta2=0.999)
 
 #training loop
 for i in range(10001):
@@ -304,8 +316,9 @@ for i in range(10001):
     #forward pass
     l1.forward(x)
     l1_relu.forward(l1.output)
+    l1_dropout.forward(l1_relu.output)
 
-    l2.forward(l1_relu.output)
+    l2.forward(l1_dropout.output)
     smax_and_cce.forward(l2.output, y)
 
     #loss
@@ -318,7 +331,9 @@ for i in range(10001):
     #backwards pass
     smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
     l2.backward(gradients=smax_and_cce.gradients)
-    l1_relu.backward(gradients=l2.gradients)
+
+    l1_dropout.backward(gradients=l2.gradients)
+    l1_relu.backward(gradients=l1_dropout.gradients)
     l1.backward(gradients=l1_relu.gradients)
 
     #optimization
