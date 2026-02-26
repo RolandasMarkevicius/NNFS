@@ -75,6 +75,13 @@ class Softmax:
         negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
         self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
 
+class Sigmoid:
+    def forward(self, input):
+        self.output = 1 / (1 + np.exp(-input))
+
+    def backward(self, gradients):
+        self.d_sigmoid = gradients * self.output * (1 - self.output)
+
 class Loss:
     def calculate(self, input, labels):
         loss, accuracy = self.forward(input, labels)
@@ -116,7 +123,7 @@ class CCE_loss(Loss):
 
         if len(np_labels.shape) == 1:
             yhat = input_clipped[range(len(input_clipped)), np_labels]
-            accuracy = largest_index == np_labels
+            accuracy = largest_index == np_labels #what is this????
 
         elif len(np_labels.shape) == 2:
             yhat = np.sum((input_clipped * np_labels), axis=1) #what does keep dims do?
@@ -156,6 +163,32 @@ class Combined_Softamx_and_CCE:
 
         #noramlise gradients
         self.gradients = self.gradients / self.sample_count
+
+class BCE_loss(Loss):
+    def forward(self, inputs, labels):
+        self.inputs = inputs
+        self.labels = labels
+        self.input_clipped = np.clip(self.inputs, 1e-7, 1-1e-7)
+
+        self.loss_per_sample = self.labels * -np.log(self.input_clipped) + (1 - self.labels) * -np.log(1 - self.input_clipped)
+        self.output = np.mean(self.loss_per_sample, axis=-1)
+
+        boolean_outputs = (self.inputs > 0.5) * 1 #get a boolean array of True and False
+
+        self.accuracy = np.mean(boolean_outputs == self.labels)
+        self.loss = self.output
+
+        return self.loss, self.accuracy
+
+        #get accuracy
+
+    def backward(self, gradients, labels):
+        #clip incoming gradients
+        self.clipped_gradients = np.clip(gradients, 1e-7, 1-1e-7)
+        nr_of_samples = self.clipped_gradients.shape[0]
+
+        #calculate the gradients
+        self.d_loss = - (1 / nr_of_samples) * (labels / self.clipped_gradients - (1 - labels) / (1 - self.clipped_gradients))
 
 class Optimizer_SGD_with_momentum:
     def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
@@ -250,7 +283,7 @@ class Optimizer_RMSProp:
         self.iterations += 1
 
 class Optimizer_Adam:
-    def __init__(self, learning_rate=1, decay=0.01, eps=1e-7, beta1=0.9, beta2=0.999):
+    def __init__(self, learning_rate=0.001, decay=0., eps=1e-7, beta1=0.9, beta2=0.999):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
         self.decay = decay
@@ -294,21 +327,90 @@ class Optimizer_Adam:
     def post_optimize(self):
         self.iterations += 1
 
+'''CLASSIFICATION'''
+# #define the dataset
+# x, y = spiral_data(samples=100, classes=3)
+
+# #network architecture
+# l1 = Layer(2,512, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+# l1_relu = Activation()
+# l1_dropout = Dropout(dropout_rate=0.9)
+# l2 = Layer(512,3)
+# l2_softmax = Softmax()
+
+# # loss_function = CCE_loss()
+# smax_and_cce = Combined_Softamx_and_CCE()
+
+# #optimizer
+# optimizer = Optimizer_Adam(learning_rate=0.05, decay=5e-5, eps=1e-7, beta1=0.9, beta2=0.999)
+
+# #training loop
+# for i in range(10001):
+
+#     #forward pass
+#     l1.forward(x)
+#     l1_relu.forward(l1.output)
+#     l1_dropout.forward(l1_relu.output)
+
+#     l2.forward(l1_dropout.output)
+#     smax_and_cce.forward(l2.output, y)
+
+#     #loss
+#     data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
+#     regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+
+#     loss = data_loss + regularization_loss
+#     print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+
+#     #backwards pass
+#     smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
+#     l2.backward(gradients=smax_and_cce.gradients)
+
+#     l1_dropout.backward(gradients=l2.gradients)
+#     l1_relu.backward(gradients=l1_dropout.gradients)
+#     l1.backward(gradients=l1_relu.gradients)
+
+#     #optimization
+#     optimizer.pre_optimize()
+#     optimizer.optimize(layer=l1)
+#     optimizer.optimize(layer=l2)
+#     optimizer.post_optimize()
+    
+# #model validation
+# x_test, y_test = spiral_data(samples=100, classes=3)
+
+# #forward pass
+# l1.forward(x_test)
+# l1_relu.forward(l1.output)
+
+# l2.forward(l1_relu.output)
+# smax_and_cce.forward(l2.output, y_test)
+
+# #loss
+# data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
+# regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+
+# loss = data_loss + regularization_loss
+# print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+
+'''BINARY CROSS-ENTROPY REGRESSION'''
 #define the dataset
-x, y = spiral_data(samples=100, classes=3)
+x, y = spiral_data(samples=100, classes=2)
+
+y = y.reshape(-1, 1)
 
 #network architecture
-l1 = Layer(2,512, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+l1 = Layer(2, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
 l1_relu = Activation()
 l1_dropout = Dropout(dropout_rate=0.9)
-l2 = Layer(512,3)
-l2_softmax = Softmax()
+l2 = Layer(64, 1)
+l2_sigmoid = Sigmoid()
 
 # loss_function = CCE_loss()
-smax_and_cce = Combined_Softamx_and_CCE()
+loss_bce = BCE_loss()
 
 #optimizer
-optimizer = Optimizer_Adam(learning_rate=0.05, decay=5e-5, eps=1e-7, beta1=0.9, beta2=0.999)
+optimizer = Optimizer_Adam(decay=5e-7)
 
 #training loop
 for i in range(10001):
@@ -316,24 +418,26 @@ for i in range(10001):
     #forward pass
     l1.forward(x)
     l1_relu.forward(l1.output)
-    l1_dropout.forward(l1_relu.output)
+    #l1_dropout.forward(l1_relu.output)
 
-    l2.forward(l1_dropout.output)
-    smax_and_cce.forward(l2.output, y)
+    l2.forward(l1_relu.output)
+    l2_sigmoid.forward(l2.output)
+    avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y)
 
     #loss
-    data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
-    regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+    data_loss, accracy = avg_loss, avg_acc
+    regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
 
     loss = data_loss + regularization_loss
     print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
 
     #backwards pass
-    smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
-    l2.backward(gradients=smax_and_cce.gradients)
+    loss_bce.backward(gradients=l2_sigmoid.output, labels=y)
+    l2_sigmoid.backward(gradients=loss_bce.d_loss)
+    l2.backward(gradients=l2_sigmoid.d_sigmoid)
 
-    l1_dropout.backward(gradients=l2.gradients)
-    l1_relu.backward(gradients=l1_dropout.gradients)
+    #l1_dropout.backward(gradients=l2.gradients)
+    l1_relu.backward(gradients=l2.gradients)
     l1.backward(gradients=l1_relu.gradients)
 
     #optimization
@@ -343,18 +447,21 @@ for i in range(10001):
     optimizer.post_optimize()
     
 #model validation
-x_test, y_test = spiral_data(samples=100, classes=3)
+x_test, y_test = spiral_data(samples=100, classes=2)
+
+y_test = y.reshape(-1, 1)
 
 #forward pass
 l1.forward(x_test)
 l1_relu.forward(l1.output)
 
 l2.forward(l1_relu.output)
-smax_and_cce.forward(l2.output, y_test)
+l2_sigmoid.forward(l2.output)
+avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y_test)
 
 #loss
-data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
-regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
+data_loss, accracy = avg_loss, avg_acc
+regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
 
 loss = data_loss + regularization_loss
 print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
