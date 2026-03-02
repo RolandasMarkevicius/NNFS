@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib as plt
 import nnfs
-from nnfs.datasets import spiral_data
+from nnfs.datasets import spiral_data, sine_data
 
 nnfs.init()
 
@@ -26,7 +26,7 @@ class Layer:
         #update the weights with regularization
         if self.l1_lambda_weights > 0:
             d_l1_weights = np.ones_like(self.d_weights)
-            d_l1_weights[self.d_weights <= 0] = -1
+            d_l1_weights[self.weights <= 0] = -1
             self.d_weights += self.l1_lambda_weights * d_l1_weights #why are we summing this?
 
         #update the weights with l2 regualrization
@@ -40,7 +40,7 @@ class Layer:
         #update the bias with regularization
         if self.l1_lambda_bias > 0:
             d_l1_bias = np.ones_like(self.d_bias)
-            d_l1_bias[self.d_bias <= 0] = -1
+            d_l1_bias[self.bias <= 0] = -1
             self.d_bias += self.l1_lambda_bias * d_l1_bias
 
         if self.l2_lambda_bias > 0:
@@ -59,16 +59,22 @@ class Dropout:
         self.output = inputs * self.binary_mask / self.dropout_rate
 
     def backward(self, gradients):
-        self.gradients = gradients * self.binary_mask / self.dropout_rate
-   
-class Activation:
+        self.d_dropout = gradients * self.binary_mask / self.dropout_rate
+
+class Linear:
+    def forward(self, input):
+        self.output = input
+    def backward(self, gradients):
+        self.d_linear = gradients.copy() #is a copy detrimental here?
+
+class ReLU:
     def forward(self, input):
         self.inputs = input
         self.output = np.maximum(0, input)
 
     def backward(self, gradients):
-        self.gradients = gradients.copy()
-        self.gradients[self.inputs <= 0] = 0 
+        self.d_relu = gradients.copy()
+        self.d_relu[self.inputs <= 0] = 0 
 
 class Softmax:
     def forward(self, input):
@@ -115,6 +121,34 @@ class Loss:
 
         return regularization_loss
         
+class MSE_loss(Loss):
+    def forward(self, input, label):
+        self.sqr_diff = (label - input) ** 2
+        self.loss = np.mean(self.sqr_diff, axis=-1)
+
+        self.acc_value = np.std(label)
+        self.accuracy = np.mean(np.abs(input - label) < self.acc_value)
+
+        return self.loss, self. accuracy
+
+    def backward(self, input, label):
+        self.sample_count = np.array(input).shape[0]
+        self.d_loss = -2 / self.sample_count * (label - input)
+
+class MAE_loss(Loss):
+    def forward(self, input, label):
+        self.loss = np.mean(np.abs(input - label), axis=-1)
+        self.acc_value = np.std(label) / 200
+        self.accuracy = np.mean(np.abs(input - label) < self.acc_value)
+
+        return self.loss, self.accuracy
+
+    def backward(self, input, label):
+        self.sample_count = input.shape[0]
+        self.feature_count = input.shape[1]
+        self.d_loss_per_feature = np.sign(input - label) / self.feature_count
+        self.d_loss = self.d_loss_per_feature / self.sample_count
+
 class CCE_loss(Loss):
     def forward(self, input, labels):
         np_labels = np.array(labels)
@@ -394,74 +428,127 @@ class Optimizer_Adam:
 # print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
 
 '''BINARY CROSS-ENTROPY REGRESSION'''
-#define the dataset
-x, y = spiral_data(samples=100, classes=2)
+# #define the dataset
+# x, y = spiral_data(samples=100, classes=2)
 
-y = y.reshape(-1, 1)
+# y = y.reshape(-1, 1)
+
+# #network architecture
+# l1 = Layer(2, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+# l1_relu = Activation()
+# l1_dropout = Dropout(dropout_rate=0.9)
+# l2 = Layer(64, 1)
+# l2_sigmoid = Sigmoid()
+
+# # loss_function = CCE_loss()
+# loss_bce = BCE_loss()
+
+# #optimizer
+# optimizer = Optimizer_Adam(decay=5e-7)
+
+# #training loop
+# for i in range(10001):
+
+#     #forward pass
+#     l1.forward(x)
+#     l1_relu.forward(l1.output)
+#     #l1_dropout.forward(l1_relu.output)
+
+#     l2.forward(l1_relu.output)
+#     l2_sigmoid.forward(l2.output)
+#     avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y)
+
+#     #loss
+#     data_loss, accracy = avg_loss, avg_acc
+#     regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
+
+#     loss = data_loss + regularization_loss
+#     print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+
+#     #backwards pass
+#     loss_bce.backward(gradients=l2_sigmoid.output, labels=y)
+#     l2_sigmoid.backward(gradients=loss_bce.d_loss)
+#     l2.backward(gradients=l2_sigmoid.d_sigmoid)
+
+#     #l1_dropout.backward(gradients=l2.gradients)
+#     l1_relu.backward(gradients=l2.gradients)
+#     l1.backward(gradients=l1_relu.gradients)
+
+#     #optimization
+#     optimizer.pre_optimize()
+#     optimizer.optimize(layer=l1)
+#     optimizer.optimize(layer=l2)
+#     optimizer.post_optimize()
+    
+# #model validation
+# x_test, y_test = spiral_data(samples=100, classes=2)
+
+# y_test = y.reshape(-1, 1)
+
+# #forward pass
+# l1.forward(x_test)
+# l1_relu.forward(l1.output)
+
+# l2.forward(l1_relu.output)
+# l2_sigmoid.forward(l2.output)
+# avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y_test)
+
+# #loss
+# data_loss, accracy = avg_loss, avg_acc
+# regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
+
+# loss = data_loss + regularization_loss
+# print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+
+'''REGRESSION'''
+#data
+x, y = sine_data()
 
 #network architecture
-l1 = Layer(2, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
-l1_relu = Activation()
+l1 = Layer(1, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+l1_relu = ReLU()
 l1_dropout = Dropout(dropout_rate=0.9)
 l2 = Layer(64, 1)
-l2_sigmoid = Sigmoid()
+l2_linear = Linear()
 
 # loss_function = CCE_loss()
-loss_bce = BCE_loss()
+loss_mse = MSE_loss()
 
 #optimizer
 optimizer = Optimizer_Adam(decay=5e-7)
 
-#training loop
-for i in range(10001):
-
+#training
+for epoch in range(10000):
     #forward pass
-    l1.forward(x)
+    l1.forward(inputs=x)
     l1_relu.forward(l1.output)
-    #l1_dropout.forward(l1_relu.output)
+    l1_dropout.forward(l1_relu.output)
 
-    l2.forward(l1_relu.output)
-    l2_sigmoid.forward(l2.output)
-    avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y)
+    l2.forward(l1_dropout.output)
+    l2_linear.forward(l2.output)
 
-    #loss
-    data_loss, accracy = avg_loss, avg_acc
-    regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
+    loss_mse.forward(input=l2_linear.output, label=y)
 
-    loss = data_loss + regularization_loss
-    print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+    #calculate loss
+    avg_loss, accuracy = loss_mse.calculate(input=l2_linear.output, labels=y)
+    reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2)
+    total_loss = avg_loss + reg_loss
 
-    #backwards pass
-    loss_bce.backward(gradients=l2_sigmoid.output, labels=y)
-    l2_sigmoid.backward(gradients=loss_bce.d_loss)
-    l2.backward(gradients=l2_sigmoid.d_sigmoid)
+    #backward pass
+    loss_mse.backward(input=l2_linear.output, label=y)
+    l2_linear.backward(gradients=loss_mse.d_loss)
+    l2.backward(gradients=l2_linear.d_linear)
 
-    #l1_dropout.backward(gradients=l2.gradients)
-    l1_relu.backward(gradients=l2.gradients)
-    l1.backward(gradients=l1_relu.gradients)
+    l1_dropout.backward(gradients=l2.gradients)
+    l1_relu.backward(gradients=l1_dropout.d_dropout)
+    l1.backward(gradients=l1_relu.d_relu)
 
     #optimization
     optimizer.pre_optimize()
     optimizer.optimize(layer=l1)
     optimizer.optimize(layer=l2)
     optimizer.post_optimize()
-    
-#model validation
-x_test, y_test = spiral_data(samples=100, classes=2)
 
-y_test = y.reshape(-1, 1)
+    print(f'Data Loss: {avg_loss}, Reg Loss: {reg_loss}, Total Loss: {total_loss}, Accuracy: {accuracy}')
 
-#forward pass
-l1.forward(x_test)
-l1_relu.forward(l1.output)
-
-l2.forward(l1_relu.output)
-l2_sigmoid.forward(l2.output)
-avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y_test)
-
-#loss
-data_loss, accracy = avg_loss, avg_acc
-regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
-
-loss = data_loss + regularization_loss
-print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
+#validation
