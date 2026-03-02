@@ -7,7 +7,7 @@ nnfs.init()
 
 class Layer:
     def __init__(self, nr_inputs, nr_neurons, l1_lambda_weights=0, l1_lambda_bias=0, l2_lambda_weights=0, l2_lambda_bias=0):
-        self.weights = 0.01 * np.random.randn(nr_inputs, nr_neurons)
+        self.weights = 0.1 * np.random.randn(nr_inputs, nr_neurons)
         self.bias = np.zeros((1, nr_neurons))
 
         self.l1_lambda_weights = l1_lambda_weights
@@ -126,7 +126,7 @@ class MSE_loss(Loss):
         self.sqr_diff = (label - input) ** 2
         self.loss = np.mean(self.sqr_diff, axis=-1)
 
-        self.acc_value = np.std(label)
+        self.acc_value = np.std(label) / 250
         self.accuracy = np.mean(np.abs(input - label) < self.acc_value)
 
         return self.loss, self. accuracy
@@ -138,7 +138,7 @@ class MSE_loss(Loss):
 class MAE_loss(Loss):
     def forward(self, input, label):
         self.loss = np.mean(np.abs(input - label), axis=-1)
-        self.acc_value = np.std(label) / 200
+        self.acc_value = np.std(label) / 250
         self.accuracy = np.mean(np.abs(input - label) < self.acc_value)
 
         return self.loss, self.accuracy
@@ -505,48 +505,57 @@ class Optimizer_Adam:
 x, y = sine_data()
 
 #network architecture
-l1 = Layer(1, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
+l1 = Layer(1, 64)
 l1_relu = ReLU()
-l1_dropout = Dropout(dropout_rate=0.9)
-l2 = Layer(64, 1)
-l2_linear = Linear()
+# l1_dropout = Dropout(dropout_rate=0.9)
+l2 = Layer(64, 64)
+l2_relu = ReLU()
+l3 = Layer(64, 1)
+l3_linear = Linear()
 
 # loss_function = CCE_loss()
 loss_mse = MSE_loss()
 
 #optimizer
-optimizer = Optimizer_Adam(decay=5e-7)
+optimizer = Optimizer_Adam(learning_rate=0.005, decay=1e-3)
 
 #training
 for epoch in range(10000):
     #forward pass
     l1.forward(inputs=x)
     l1_relu.forward(l1.output)
-    l1_dropout.forward(l1_relu.output)
+    # l1_dropout.forward(l1_relu.output)
 
-    l2.forward(l1_dropout.output)
-    l2_linear.forward(l2.output)
+    l2.forward(l1_relu.output)
+    l2_relu.forward(l2.output)
 
-    loss_mse.forward(input=l2_linear.output, label=y)
+    l3.forward(l2_relu.output)
+    l3_linear.forward(l3.output)
+
+    loss_mse.forward(input=l3_linear.output, label=y)
 
     #calculate loss
-    avg_loss, accuracy = loss_mse.calculate(input=l2_linear.output, labels=y)
-    reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2)
+    avg_loss, accuracy = loss_mse.calculate(input=l3_linear.output, labels=y)
+    reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2) + loss_mse.regularization_loss(l3)
     total_loss = avg_loss + reg_loss
 
     #backward pass
-    loss_mse.backward(input=l2_linear.output, label=y)
-    l2_linear.backward(gradients=loss_mse.d_loss)
-    l2.backward(gradients=l2_linear.d_linear)
+    loss_mse.backward(input=l3_linear.output, label=y)
+    l3_linear.backward(gradients=loss_mse.d_loss)
+    l3.backward(gradients=l3_linear.d_linear)
 
-    l1_dropout.backward(gradients=l2.gradients)
-    l1_relu.backward(gradients=l1_dropout.d_dropout)
+    l2_relu.backward(gradients=l3.gradients)
+    l2.backward(gradients=l2_relu.d_relu)
+
+    # l1_dropout.backward(gradients=l2.gradients)
+    l1_relu.backward(gradients=l2.gradients)
     l1.backward(gradients=l1_relu.d_relu)
 
     #optimization
     optimizer.pre_optimize()
     optimizer.optimize(layer=l1)
     optimizer.optimize(layer=l2)
+    optimizer.optimize(layer=l3)
     optimizer.post_optimize()
 
     print(f'Data Loss: {avg_loss}, Reg Loss: {reg_loss}, Total Loss: {total_loss}, Accuracy: {accuracy}')
