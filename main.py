@@ -7,7 +7,7 @@ nnfs.init()
 
 class Layer:
     def __init__(self, nr_inputs, nr_neurons, l1_lambda_weights=0, l1_lambda_bias=0, l2_lambda_weights=0, l2_lambda_bias=0):
-        self.weights = 0.1 * np.random.randn(nr_inputs, nr_neurons)
+        self.weights = 0.1 * np.random.randn(nr_inputs, nr_neurons) #does this implementation need to change?
         self.bias = np.zeros((1, nr_neurons))
 
         self.l1_lambda_weights = l1_lambda_weights
@@ -50,6 +50,10 @@ class Layer:
         #return outputs for further backpropagation
         self.gradients = np.dot(gradients, self.weights.T)
 
+class Init_layer():
+    def forward(self, input):
+        self.output = input
+
 class Dropout:
     def __init__(self, dropout_rate):
         self.dropout_rate = dropout_rate
@@ -64,8 +68,12 @@ class Dropout:
 class Linear:
     def forward(self, input):
         self.output = input
+
     def backward(self, gradients):
         self.d_linear = gradients.copy() #is a copy detrimental here?
+
+    def prediction(self, outputs):
+        return outputs
 
 class ReLU:
     def forward(self, input):
@@ -76,10 +84,16 @@ class ReLU:
         self.d_relu = gradients.copy()
         self.d_relu[self.inputs <= 0] = 0 
 
+    def prediction(self, output):
+        return output
+
 class Softmax:
     def forward(self, input):
         negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
         self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
+    
+    def prediction(self, output):
+        return np.argmax(output, axis=1)
 
 class Sigmoid:
     def forward(self, input):
@@ -88,48 +102,69 @@ class Sigmoid:
     def backward(self, gradients):
         self.d_sigmoid = gradients * self.output * (1 - self.output)
 
+    def prediction(self, output):
+        return (output > 0.5) * 1
+
 class Loss:
-    def calculate(self, input, labels):
-        loss, accuracy = self.forward(input, labels)
-
-        avg_loss = np.mean(loss)
-
-        avg_accuracy = np.mean(accuracy)
-
-        return avg_loss, avg_accuracy
-    
-    def regularization_loss(self, layer):
+    def regularization_loss(self, weight_layer_list):
         #l1_loss = sum of absolute value of weights/bias times lambda
-        
+    
         regularization_loss = 0
 
-        #l1_weights
-        if layer.l1_lambda_weights > 0:
-            regularization_loss += layer.l1_lambda_weights * np.sum(np.absolute(layer.weights))
+        for layer in weight_layer_list:
 
-        #l1_bias
-        if layer.l1_lambda_bias > 0:
-            regularization_loss += layer.l1_lambda_bias * np.sum(np.absolute(layer.bias))
-        
-        #l2_weights
-        if layer.l2_lambda_weights > 0:
-            regularization_loss += layer.l2_lambda_weights * np.sum(layer.weights ** 2)
+            #l1_weights
+            if layer.l1_lambda_weights > 0:
+                regularization_loss += layer.l1_lambda_weights * np.sum(np.absolute(layer.weights))
 
-        #l2_bias
-        if layer.l2_lambda_bias > 0:
-            regularization_loss += layer.l2_lambda_bias * np.sum(layer.bias ** 2)
+            #l1_bias
+            if layer.l1_lambda_bias > 0:
+                regularization_loss += layer.l1_lambda_bias * np.sum(np.absolute(layer.bias))
+            
+            #l2_weights
+            if layer.l2_lambda_weights > 0:
+                regularization_loss += layer.l2_lambda_weights * np.sum(layer.weights ** 2)
+
+            #l2_bias
+            if layer.l2_lambda_bias > 0:
+                regularization_loss += layer.l2_lambda_bias * np.sum(layer.bias ** 2)
 
         return regularization_loss
+
+    def calculate(self, input, labels, weight_layer_list):
+        forward_loss = self.forward(input, labels)
+        reg_loss = self.regularization_loss(weight_layer_list=weight_layer_list)
+
+        avg_loss = np.mean(forward_loss)
+        total_loss = avg_loss + reg_loss
+
+        return total_loss
+    
+class Accuracy():
+    def calculate(self, input, label):
+        sample_accuracy = self.compare(input, label)
+        batch_accuracy = np.mean(sample_accuracy)
+        return batch_accuracy
+    
+class Regression_accuracy(Accuracy):
+    def __init__(self):
+        self.acc_target = None
+
+    def init(self, label, reinit=False):
+        if self.acc_target == None or reinit:
+            self.acc_target = np.std(label) / 250
+
+    def compare(self, input, label):
+        sample_accuracy = np.mean(np.abs(input - label) < self.acc_target)
+
+        return sample_accuracy
         
 class MSE_loss(Loss):
     def forward(self, input, label):
         self.sqr_diff = (label - input) ** 2
         self.loss = np.mean(self.sqr_diff, axis=-1)
 
-        self.acc_value = np.std(label) / 250
-        self.accuracy = np.mean(np.abs(input - label) < self.acc_value)
-
-        return self.loss, self. accuracy
+        return self.loss
 
     def backward(self, input, label):
         self.sample_count = np.array(input).shape[0]
@@ -361,6 +396,82 @@ class Optimizer_Adam:
     def post_optimize(self):
         self.iterations += 1
 
+class Model():
+    def __init__(self):
+        self.layer_list = []
+        self.weight_layer_list = []
+
+    def add(self, layer):
+        self.layer_list.append(layer)
+
+    def set(self, *, loss_function, accuracy_function, optimizer):
+        self.loss_function = loss_function
+        self.accuracy_function = accuracy_function
+        self.optimizer = optimizer
+
+    def finalise(self):
+        for i in len(self.layer_list):
+            if i == 0:
+                self.init_layer = Init_layer()
+                self.layer_list[i].prev = self.init_layer
+
+            elif i <= len(self.layer_list) - 1:
+                self.layer_list[i].prev = self.layer_list[i-1]
+                self.layer_list[i].next = self.layer_list[i+1]
+
+            else:
+                self.layer_list[i].prev = self.layer_list[i-1]
+                self.layer_list[i].next = self.loss
+                self.last_activation_function = self.layer_list[i]
+
+        #set layers with weights
+        for layer in self.layer_list:
+            if hasattr(layer, 'weights'):
+                self.weight_layer_list.append(layer)
+            
+    def forward(self, data):
+        self.init_layer.forward(data)
+
+        for layer in self.layer_list:
+            layer.forward(layer.prev.output)
+
+        return layer.output #layer is now the last object in the list
+
+    def backward(self):
+        pass
+
+    def train(self, epochs, data, labels):
+        for epoch in epochs:
+            #forward pass
+            self.network_output = self.forward(data=data)
+
+            #loss calculation
+            self.loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
+
+            #accuracy calculation
+            self.predictions = self.last_activation_function.prediction(self.network_output)
+            self.accuracy = self.accuracy_function.calculate(self.predictions, labels)
+            
+            #backward pass
+            #optimization
+
+    def inference(self):
+        pass
+
+#model definition
+model = Model()
+
+model.add(layer=Layer(nr_inputs=1, nr_neurons=64))
+model.add(layer=ReLU())
+model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+model.add(layer=ReLU())
+model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
+model.add(layer=Linear())
+
+model.set(loss=MSE_loss(), accuracy=Accuracy(), optimizer=Optimizer_Adam())
+
+model.finalise()
+
 '''CLASSIFICATION'''
 # #define the dataset
 # x, y = spiral_data(samples=100, classes=3)
@@ -501,63 +612,63 @@ class Optimizer_Adam:
 # print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
 
 '''REGRESSION'''
-#data
-x, y = sine_data()
+# #data
+# x, y = sine_data()
 
-#network architecture
-l1 = Layer(1, 64)
-l1_relu = ReLU()
-# l1_dropout = Dropout(dropout_rate=0.9)
-l2 = Layer(64, 64)
-l2_relu = ReLU()
-l3 = Layer(64, 1)
-l3_linear = Linear()
+# #network architecture
+# l1 = Layer(1, 64)
+# l1_relu = ReLU()
+# # l1_dropout = Dropout(dropout_rate=0.9)
+# l2 = Layer(64, 64)
+# l2_relu = ReLU()
+# l3 = Layer(64, 1)
+# l3_linear = Linear()
 
-# loss_function = CCE_loss()
-loss_mse = MSE_loss()
+# # loss_function = CCE_loss()
+# loss_mse = MSE_loss()
 
-#optimizer
-optimizer = Optimizer_Adam(learning_rate=0.005, decay=1e-3)
+# #optimizer
+# optimizer = Optimizer_Adam(learning_rate=0.005, decay=1e-3)
 
-#training
-for epoch in range(10000):
-    #forward pass
-    l1.forward(inputs=x)
-    l1_relu.forward(l1.output)
-    # l1_dropout.forward(l1_relu.output)
+# #training
+# for epoch in range(10000):
+#     #forward pass
+#     l1.forward(inputs=x)
+#     l1_relu.forward(l1.output)
+#     # l1_dropout.forward(l1_relu.output)
 
-    l2.forward(l1_relu.output)
-    l2_relu.forward(l2.output)
+#     l2.forward(l1_relu.output)
+#     l2_relu.forward(l2.output)
 
-    l3.forward(l2_relu.output)
-    l3_linear.forward(l3.output)
+#     l3.forward(l2_relu.output)
+#     l3_linear.forward(l3.output)
 
-    loss_mse.forward(input=l3_linear.output, label=y)
+#     loss_mse.forward(input=l3_linear.output, label=y)
 
-    #calculate loss
-    avg_loss, accuracy = loss_mse.calculate(input=l3_linear.output, labels=y)
-    reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2) + loss_mse.regularization_loss(l3)
-    total_loss = avg_loss + reg_loss
+#     #calculate loss
+#     avg_loss, accuracy = loss_mse.calculate(input=l3_linear.output, labels=y)
+#     reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2) + loss_mse.regularization_loss(l3)
+#     total_loss = avg_loss + reg_loss
 
-    #backward pass
-    loss_mse.backward(input=l3_linear.output, label=y)
-    l3_linear.backward(gradients=loss_mse.d_loss)
-    l3.backward(gradients=l3_linear.d_linear)
+#     #backward pass
+#     loss_mse.backward(input=l3_linear.output, label=y)
+#     l3_linear.backward(gradients=loss_mse.d_loss)
+#     l3.backward(gradients=l3_linear.d_linear)
 
-    l2_relu.backward(gradients=l3.gradients)
-    l2.backward(gradients=l2_relu.d_relu)
+#     l2_relu.backward(gradients=l3.gradients)
+#     l2.backward(gradients=l2_relu.d_relu)
 
-    # l1_dropout.backward(gradients=l2.gradients)
-    l1_relu.backward(gradients=l2.gradients)
-    l1.backward(gradients=l1_relu.d_relu)
+#     # l1_dropout.backward(gradients=l2.gradients)
+#     l1_relu.backward(gradients=l2.gradients)
+#     l1.backward(gradients=l1_relu.d_relu)
 
-    #optimization
-    optimizer.pre_optimize()
-    optimizer.optimize(layer=l1)
-    optimizer.optimize(layer=l2)
-    optimizer.optimize(layer=l3)
-    optimizer.post_optimize()
+#     #optimization
+#     optimizer.pre_optimize()
+#     optimizer.optimize(layer=l1)
+#     optimizer.optimize(layer=l2)
+#     optimizer.optimize(layer=l3)
+#     optimizer.post_optimize()
 
-    print(f'Data Loss: {avg_loss}, Reg Loss: {reg_loss}, Total Loss: {total_loss}, Accuracy: {accuracy}')
+#     print(f'Data Loss: {avg_loss}, Reg Loss: {reg_loss}, Total Loss: {total_loss}, Accuracy: {accuracy}')
 
 #validation
