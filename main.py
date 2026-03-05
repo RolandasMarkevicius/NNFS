@@ -5,9 +5,9 @@ from nnfs.datasets import spiral_data, sine_data
 
 nnfs.init()
 
-class Layer:
+class Layer():
     def __init__(self, nr_inputs, nr_neurons, l1_lambda_weights=0, l1_lambda_bias=0, l2_lambda_weights=0, l2_lambda_bias=0):
-        self.weights = 0.1 * np.random.randn(nr_inputs, nr_neurons) #does this implementation need to change?
+        self.weights = 0.01 * np.random.randn(nr_inputs, nr_neurons) #does this implementation need to change?
         self.bias = np.zeros((1, nr_neurons))
 
         self.l1_lambda_weights = l1_lambda_weights
@@ -54,7 +54,7 @@ class Init_layer():
     def forward(self, input):
         self.output = input
 
-class Dropout:
+class Dropout():
     def __init__(self, dropout_rate):
         self.dropout_rate = dropout_rate
     
@@ -65,7 +65,7 @@ class Dropout:
     def backward(self, gradients):
         self.gradients = gradients * self.binary_mask / self.dropout_rate
 
-class Linear:
+class Linear():
     def forward(self, input):
         self.output = input
 
@@ -75,7 +75,7 @@ class Linear:
     def prediction(self, outputs):
         return outputs
 
-class ReLU:
+class ReLU():
     def forward(self, input):
         self.inputs = input
         self.output = np.maximum(0, input)
@@ -87,7 +87,7 @@ class ReLU:
     def prediction(self, output):
         return output
 
-class Softmax:
+class Softmax():
     def forward(self, input):
         negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
         self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
@@ -95,7 +95,7 @@ class Softmax:
     def prediction(self, output):
         return np.argmax(output, axis=1)
 
-class Sigmoid:
+class Sigmoid():
     def forward(self, input):
         self.output = 1 / (1 + np.exp(-input))
 
@@ -104,8 +104,58 @@ class Sigmoid:
 
     def prediction(self, output):
         return (output > 0.5) * 1
+    
+class Accuracy():
+    def calculate(self, input, label):
+        sample_accuracy = self.compare(input, label)
+        batch_accuracy = np.mean(sample_accuracy)
+        return batch_accuracy
+    
+class Regression_accuracy(Accuracy):
+    def __init__(self):
+        self.acc_target = None
 
-class Loss:
+    def init(self, label, reinit=False):
+        if self.acc_target == None or reinit:
+            self.acc_target = np.std(label) / 250
+
+    def compare(self, input, label):
+        sample_accuracy = np.mean(np.abs(input - label) < self.acc_target)
+
+        return sample_accuracy
+    
+class CCE_accuracy(Accuracy):
+    def __init__(self, *, label_one_hot):
+        #define a switch for labels to be either one hot vectors or argmax integers
+        self.label_one_hot = label_one_hot
+
+    def init(self, label, reinit=False):
+        #pass the function as no initialisation is required
+        pass
+
+    def compare(self, input, label):
+        #If the labels are one hot change them to a list
+        if self.label_one_hot == True or len(label.shape) == 2:
+            self.label = np.argmax(label, axis=1)
+
+        else:
+            self.label = label
+
+        #compare inputs with labels to get a True or False output
+        comparison = input == self.label
+        return comparison
+
+class BCE_accuracy(Accuracy):
+    def __init__(self):
+        pass
+
+    def init(self, label, reinit=False):
+        pass
+
+    def compare(self, input, label):
+        pass
+
+class Loss():
     def regularization_loss(self, weight_layer_list):
         #l1_loss = sum of absolute value of weights/bias times lambda
     
@@ -139,26 +189,7 @@ class Loss:
         total_loss = avg_loss + reg_loss
 
         return total_loss
-    
-class Accuracy():
-    def calculate(self, input, label):
-        sample_accuracy = self.compare(input, label)
-        batch_accuracy = np.mean(sample_accuracy)
-        return batch_accuracy
-    
-class Regression_accuracy(Accuracy):
-    def __init__(self):
-        self.acc_target = None
 
-    def init(self, label, reinit=False):
-        if self.acc_target == None or reinit:
-            self.acc_target = np.std(label) / 250
-
-    def compare(self, input, label):
-        sample_accuracy = np.mean(np.abs(input - label) < self.acc_target)
-
-        return sample_accuracy
-        
 class MSE_loss(Loss):
     def forward(self, input, label):
         self.sqr_diff = (label - input) ** 2
@@ -188,37 +219,22 @@ class CCE_loss(Loss):
     def forward(self, input, labels):
         np_labels = np.array(labels)
         input_clipped = np.clip(input, 1e-7, 1-1e-7)
-        largest_index = np.argmax(input_clipped, axis=1)
 
         if len(np_labels.shape) == 1:
             yhat = input_clipped[range(len(input_clipped)), np_labels]
-            accuracy = largest_index == np_labels #what is this????
 
         elif len(np_labels.shape) == 2:
-            yhat = np.sum((input_clipped * np_labels), axis=1) #what does keep dims do?
-            accuracy = largest_index == np.argmax(np_labels, axis=1)
+            yhat = np.sum((input_clipped * np_labels), axis=1)
 
         else:
             print('this did not work')
 
         loss = -np.log(yhat)
 
-        return loss, accuracy
+        return loss
 
-class Combined_Softamx_and_CCE:
-    def __init__(self):
-        #initialise the softmax and cat cross entropy classes
-        self.softmax = Softmax()
-        self.loss = CCE_loss()
-
-    def forward(self, input, labels):
-        self.softmax.forward(input=input)
-        self.loss_value, self.accuracy_value = self.loss.calculate(input=self.softmax.output, labels=labels)
-        self.output = self.softmax.output
-
+class Combined_Softamx_and_CCE_loss():
     def backward(self, softmax_outputs, labels):
-        #combined partial derivative solves to: softmax outputs - true values
-        
         #define sample count
         self.sample_count = softmax_outputs.shape[0]
 
@@ -259,7 +275,7 @@ class BCE_loss(Loss):
         #calculate the gradients
         self.gradients = - (1 / nr_of_samples) * (labels / clipped_gradients - (1 - labels) / (1 - clipped_gradients))
 
-class Optimizer_SGD_with_momentum:
+class Optimizer_SGD_with_momentum():
     def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -294,7 +310,7 @@ class Optimizer_SGD_with_momentum:
     def post_optimize(self):
         self.itterations += 1
 
-class Optimizer_Adagrad:
+class Optimizer_Adagrad():
     def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -322,7 +338,7 @@ class Optimizer_Adagrad:
     def post_optimize(self):
         self.itterations += 1
 
-class Optimizer_RMSProp:
+class Optimizer_RMSProp():
     def __init__(self, learning_rate=1, decay=0.01, eps=0.0000001, beta=0.9):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -351,7 +367,7 @@ class Optimizer_RMSProp:
     def post_optimize(self):
         self.iterations += 1
 
-class Optimizer_Adam:
+class Optimizer_Adam():
     def __init__(self, learning_rate=0.001, decay=0., eps=1e-7, beta1=0.9, beta2=0.999):
         self.learning_rate = learning_rate
         self.current_learning_rate = learning_rate
@@ -400,6 +416,7 @@ class Model():
     def __init__(self):
         self.layer_list = []
         self.weight_layer_list = []
+        self.softmax_cce_backward = None
 
     def add(self, layer):
         self.layer_list.append(layer)
@@ -429,6 +446,9 @@ class Model():
         for layer in self.layer_list:
             if hasattr(layer, 'weights'):
                 self.weight_layer_list.append(layer)
+
+        if isinstance(self.layer_list[-1], Softmax) and isinstance(self.loss_function, CCE_loss):
+            self.softmax_cce_backward = Combined_Softamx_and_CCE_loss()
             
     def forward(self, data):
         self.init_layer.forward(data)
@@ -439,12 +459,21 @@ class Model():
         return layer.output #layer is now the last object in the list
 
     def backward(self, input, label):
-        #initialize the loss output
-        self.loss_function.backward(input, label)
+        #check if softmax and CCE are used
+        if self.softmax_cce_backward is not None:
+            self.softmax_cce_backward.backward(softmax_outputs=input, labels=label)
+            self.layer_list[-1].gradients = self.softmax_cce_backward.gradients
 
-        #loop thought the layer list and run .backward
-        for layer in reversed(self.layer_list):
-            layer.backward(layer.next.gradients)
+            for layer in reversed(self.layer_list[:-1]):
+                layer.backward(layer.next.gradients)
+
+        else:
+            #initialize the loss output
+            self.loss_function.backward(input, label)
+
+            #loop thought the layer list and run .backward
+            for layer in reversed(self.layer_list):
+                layer.backward(layer.next.gradients)
 
     def train(self, epochs, data, labels):
         self.accuracy_function.init(labels)
@@ -452,7 +481,7 @@ class Model():
         for epoch in range(epochs):
             #forward pass
             self.network_output = self.forward(data=data)
-
+            
             #loss calculation
             self.loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
 
@@ -472,32 +501,74 @@ class Model():
             print(f'Epoch: {epoch}',
                   f'Total Loss: {self.loss}',
                   f'Accuracy: {self.accuracy}',
-                  f'lr: {self.optimizer.current_learning_rate}',
+                  f'lr: {self.optimizer.current_learning_rate}'
                   )
 
     def inference(self):
         pass
 
-'''REGRESSION'''
-x, y = sine_data()
+# '''REGRESSION'''
+# x, y = sine_data()
+
+# #model definition
+# model = Model()
+
+# model.add(layer=Layer(nr_inputs=1, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
+# model.add(layer=Linear())
+
+# model.set(loss_function=MSE_loss(), 
+#           accuracy_function=Regression_accuracy(), 
+#           optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
+
+# model.finalise()
+
+# model.train(epochs=10001, data=x, labels=y)
+
+'''CCE CLASSIFICATION'''
+x, y = spiral_data(samples=100, classes=3)
 
 #model definition
 model = Model()
 
-model.add(layer=Layer(nr_inputs=1, nr_neurons=64))
+model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
 model.add(layer=ReLU())
 model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
 model.add(layer=ReLU())
-model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
-model.add(layer=Linear())
+model.add(layer=Layer(nr_inputs=64, nr_neurons=3))
+model.add(layer=Softmax())
 
-model.set(loss_function=MSE_loss(), 
-          accuracy_function=Regression_accuracy(), 
-          optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
+model.set(loss_function=CCE_loss(), 
+          accuracy_function=CCE_accuracy(label_one_hot=False), 
+          optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
 
 model.finalise()
 
 model.train(epochs=10001, data=x, labels=y)
+
+# '''BINARY CROSS-ENTROPY REGRESSION''' #TBC
+# x, y = spiral_data(samples=100, classes=2)
+
+# #model definition
+# model = Model()
+
+# model.add(layer=Layer(nr_inputs=1, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
+# model.add(layer=Sigmoid)
+
+# model.set(loss_function=BCE_loss(), 
+#           accuracy_function=BCE_accuracy(), 
+#           optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
+
+# model.finalise()
+
+# model.train(epochs=10001, data=x, labels=y)
 
 '''CLASSIFICATION'''
 # #define the dataset
