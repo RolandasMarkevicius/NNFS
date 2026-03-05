@@ -63,14 +63,14 @@ class Dropout:
         self.output = inputs * self.binary_mask / self.dropout_rate
 
     def backward(self, gradients):
-        self.d_dropout = gradients * self.binary_mask / self.dropout_rate
+        self.gradients = gradients * self.binary_mask / self.dropout_rate
 
 class Linear:
     def forward(self, input):
         self.output = input
 
     def backward(self, gradients):
-        self.d_linear = gradients.copy() #is a copy detrimental here?
+        self.gradients = gradients.copy() #is a copy detrimental here?
 
     def prediction(self, outputs):
         return outputs
@@ -81,8 +81,8 @@ class ReLU:
         self.output = np.maximum(0, input)
 
     def backward(self, gradients):
-        self.d_relu = gradients.copy()
-        self.d_relu[self.inputs <= 0] = 0 
+        self.gradients = gradients.copy()
+        self.gradients[self.inputs <= 0] = 0 
 
     def prediction(self, output):
         return output
@@ -100,7 +100,7 @@ class Sigmoid:
         self.output = 1 / (1 + np.exp(-input))
 
     def backward(self, gradients):
-        self.d_sigmoid = gradients * self.output * (1 - self.output)
+        self.gradients = gradients * self.output * (1 - self.output)
 
     def prediction(self, output):
         return (output > 0.5) * 1
@@ -162,13 +162,13 @@ class Regression_accuracy(Accuracy):
 class MSE_loss(Loss):
     def forward(self, input, label):
         self.sqr_diff = (label - input) ** 2
-        self.loss = np.mean(self.sqr_diff, axis=-1)
+        loss = np.mean(self.sqr_diff, axis=-1)
 
-        return self.loss
+        return loss
 
     def backward(self, input, label):
         self.sample_count = np.array(input).shape[0]
-        self.d_loss = -2 / self.sample_count * (label - input)
+        self.gradients = -2 / self.sample_count * (label - input)
 
 class MAE_loss(Loss):
     def forward(self, input, label):
@@ -182,7 +182,7 @@ class MAE_loss(Loss):
         self.sample_count = input.shape[0]
         self.feature_count = input.shape[1]
         self.d_loss_per_feature = np.sign(input - label) / self.feature_count
-        self.d_loss = self.d_loss_per_feature / self.sample_count
+        self.gradients = self.d_loss_per_feature / self.sample_count
 
 class CCE_loss(Loss):
     def forward(self, input, labels):
@@ -253,11 +253,11 @@ class BCE_loss(Loss):
 
     def backward(self, gradients, labels):
         #clip incoming gradients
-        self.clipped_gradients = np.clip(gradients, 1e-7, 1-1e-7)
-        nr_of_samples = self.clipped_gradients.shape[0]
+        clipped_gradients = np.clip(gradients, 1e-7, 1-1e-7)
+        nr_of_samples = clipped_gradients.shape[0]
 
         #calculate the gradients
-        self.d_loss = - (1 / nr_of_samples) * (labels / self.clipped_gradients - (1 - labels) / (1 - self.clipped_gradients))
+        self.gradients = - (1 / nr_of_samples) * (labels / clipped_gradients - (1 - labels) / (1 - clipped_gradients))
 
 class Optimizer_SGD_with_momentum:
     def __init__(self, learning_rate=1, decay=0.01, memory=0.9):
@@ -410,18 +410,19 @@ class Model():
         self.optimizer = optimizer
 
     def finalise(self):
-        for i in len(self.layer_list):
+        for i in range(len(self.layer_list)):
             if i == 0:
                 self.init_layer = Init_layer()
                 self.layer_list[i].prev = self.init_layer
+                self.layer_list[i].next = self.layer_list[i+1]
 
-            elif i <= len(self.layer_list) - 1:
+            elif i < len(self.layer_list) - 1:
                 self.layer_list[i].prev = self.layer_list[i-1]
                 self.layer_list[i].next = self.layer_list[i+1]
 
             else:
                 self.layer_list[i].prev = self.layer_list[i-1]
-                self.layer_list[i].next = self.loss
+                self.layer_list[i].next = self.loss_function
                 self.last_activation_function = self.layer_list[i]
 
         #set layers with weights
@@ -437,11 +438,18 @@ class Model():
 
         return layer.output #layer is now the last object in the list
 
-    def backward(self):
-        pass
+    def backward(self, input, label):
+        #initialize the loss output
+        self.loss_function.backward(input, label)
+
+        #loop thought the layer list and run .backward
+        for layer in reversed(self.layer_list):
+            layer.backward(layer.next.gradients)
 
     def train(self, epochs, data, labels):
-        for epoch in epochs:
+        self.accuracy_function.init(labels)
+
+        for epoch in range(epochs):
             #forward pass
             self.network_output = self.forward(data=data)
 
@@ -453,10 +461,25 @@ class Model():
             self.accuracy = self.accuracy_function.calculate(self.predictions, labels)
             
             #backward pass
+            self.backward(input=self.network_output, label=labels)
+
             #optimization
+            self.optimizer.pre_optimize()
+            for layer in self.weight_layer_list:
+                self.optimizer.optimize(layer)
+            self.optimizer.post_optimize()
+
+            print(f'Epoch: {epoch}',
+                  f'Total Loss: {self.loss}',
+                  f'Accuracy: {self.accuracy}',
+                  f'lr: {self.optimizer.current_learning_rate}',
+                  )
 
     def inference(self):
         pass
+
+'''REGRESSION'''
+x, y = sine_data()
 
 #model definition
 model = Model()
@@ -468,9 +491,13 @@ model.add(layer=ReLU())
 model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
 model.add(layer=Linear())
 
-model.set(loss=MSE_loss(), accuracy=Accuracy(), optimizer=Optimizer_Adam())
+model.set(loss_function=MSE_loss(), 
+          accuracy_function=Regression_accuracy(), 
+          optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
 
 model.finalise()
+
+model.train(epochs=10001, data=x, labels=y)
 
 '''CLASSIFICATION'''
 # #define the dataset
