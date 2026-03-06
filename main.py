@@ -55,15 +55,15 @@ class Init_layer():
         self.output = input
 
 class Dropout():
-    def __init__(self, dropout_rate):
-        self.dropout_rate = dropout_rate
+    def __init__(self, keep_rate):
+        self.keep_rate = keep_rate
     
     def forward(self, inputs):
-        self.binary_mask = np.random.binomial(1, self.dropout_rate, np.shape(inputs))
-        self.output = inputs * self.binary_mask / self.dropout_rate
+        self.binary_mask = np.random.binomial(1, self.keep_rate, np.shape(inputs))
+        self.output = inputs * self.binary_mask / self.keep_rate
 
     def backward(self, gradients):
-        self.gradients = gradients * self.binary_mask / self.dropout_rate
+        self.gradients = gradients * self.binary_mask / self.keep_rate
 
 class Linear():
     def forward(self, input):
@@ -186,9 +186,9 @@ class Loss():
         reg_loss = self.regularization_loss(weight_layer_list=weight_layer_list)
 
         avg_loss = np.mean(forward_loss)
-        total_loss = avg_loss + reg_loss
+        #total_loss = avg_loss + reg_loss
 
-        return total_loss
+        return avg_loss, reg_loss
 
 class MSE_loss(Loss):
     def forward(self, input, label):
@@ -416,6 +416,7 @@ class Model():
     def __init__(self):
         self.layer_list = []
         self.weight_layer_list = []
+        self.validation_layer_list = []
         self.softmax_cce_backward = None
 
     def add(self, layer):
@@ -425,6 +426,8 @@ class Model():
         self.loss_function = loss_function
         self.accuracy_function = accuracy_function
         self.optimizer = optimizer
+
+        print(len(self.layer_list))
 
     def finalise(self):
         for i in range(len(self.layer_list)):
@@ -446,6 +449,12 @@ class Model():
         for layer in self.layer_list:
             if hasattr(layer, 'weights'):
                 self.weight_layer_list.append(layer)
+
+        #filter dropout layers for validation pass
+        for layer in self.layer_list:
+            if not isinstance(layer, Dropout):
+                print(isinstance(layer, Dropout))
+                self.validation_layer_list.append(layer)
 
         if isinstance(self.layer_list[-1], Softmax) and isinstance(self.loss_function, CCE_loss):
             self.softmax_cce_backward = Combined_Softamx_and_CCE_loss()
@@ -475,7 +484,10 @@ class Model():
             for layer in reversed(self.layer_list):
                 layer.backward(layer.next.gradients)
 
-    def train(self, epochs, data, labels):
+    def validate(self, x_val, y_val):
+        pass
+
+    def train(self, epochs, data, labels, validation_data=None):
         self.accuracy_function.init(labels)
 
         for epoch in range(epochs):
@@ -483,7 +495,8 @@ class Model():
             self.network_output = self.forward(data=data)
             
             #loss calculation
-            self.loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
+            self.forward_loss, self.reg_loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
+            self.total_loss = self.forward_loss + self.reg_loss
 
             #accuracy calculation
             self.predictions = self.last_activation_function.prediction(self.network_output)
@@ -499,12 +512,64 @@ class Model():
             self.optimizer.post_optimize()
 
             print(f'Epoch: {epoch}',
-                  f'Total Loss: {self.loss}',
+                  f'Total Loss: {self.total_loss}',
                   f'Accuracy: {self.accuracy}',
                   f'lr: {self.optimizer.current_learning_rate}'
                   )
+            
+        #run validation at the end of the training run
+        if validation_data is not None:
+            x_val, y_val = validation_data
+
+            #forward pass
+            self.val_output = self.forward(data=x_val)
+
+            #loss calculation
+            self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val, self.weight_layer_list)
+
+            #accuracy calculation
+            self.val_predictions = self.last_activation_function.prediction(self.val_output)
+            self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val)
+
+            print(f'Validation Loss: {self.val_forward_loss}',
+                  f'Validation Accuracy: {self.val_accuracy}'
+                  )
 
     def inference(self):
+        # #omit the dropoutlayers somehow
+        # self.accuracy_function.init(y_val)
+
+        # self.init_layer.forward(x_val)
+
+        # for layer in self.validation_layer_list:
+        #     layer.forward(layer.prev.output)
+
+        # return layer.output #layer is now the last object in the list
+
+        # self.network_output = self.forward(data=x_val)
+        
+        # #loss calculation
+        # self.loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
+
+        # #accuracy calculation
+        # self.predictions = self.last_activation_function.prediction(self.network_output)
+        # self.accuracy = self.accuracy_function.calculate(self.predictions, labels)
+        
+        # #backward pass
+        # self.backward(input=self.network_output, label=labels)
+
+        # #optimization
+        # self.optimizer.pre_optimize()
+        # for layer in self.weight_layer_list:
+        #     self.optimizer.optimize(layer)
+        # self.optimizer.post_optimize()
+
+        # print(f'Epoch: {epoch}',
+        #         f'Total Loss: {self.loss}',
+        #         f'Accuracy: {self.accuracy}',
+        #         f'lr: {self.optimizer.current_learning_rate}'
+        #         )
+        
         pass
 
 # '''REGRESSION'''
@@ -531,13 +596,19 @@ class Model():
 '''CCE CLASSIFICATION'''
 x, y = spiral_data(samples=100, classes=3)
 
+x_val, y_val = spiral_data(samples=100, classes=3)
+
+validation_data = x_val, y_val
+
 #model definition
 model = Model()
 
 model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
 model.add(layer=ReLU())
+model.add(layer=Dropout(keep_rate=0.9))
 model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
 model.add(layer=ReLU())
+model.add(layer=Dropout(keep_rate=0.9))
 model.add(layer=Layer(nr_inputs=64, nr_neurons=3))
 model.add(layer=Softmax())
 
@@ -547,7 +618,7 @@ model.set(loss_function=CCE_loss(),
 
 model.finalise()
 
-model.train(epochs=10001, data=x, labels=y)
+model.train(epochs=10001, data=x, labels=y, validation_data=validation_data)
 
 # '''BINARY CROSS-ENTROPY REGRESSION''' #TBC
 # x, y = spiral_data(samples=100, classes=2)
