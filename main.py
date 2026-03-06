@@ -1,7 +1,12 @@
 import numpy as np
 import matplotlib as plt
 import nnfs
+import os
+import urllib
+import urllib.request
+
 from nnfs.datasets import spiral_data, sine_data
+from zipfile import ZipFile
 
 nnfs.init()
 
@@ -125,7 +130,7 @@ class Regression_accuracy(Accuracy):
         return sample_accuracy
     
 class CCE_accuracy(Accuracy):
-    def __init__(self, *, label_one_hot):
+    def __init__(self, *, label_one_hot=False):
         #define a switch for labels to be either one hot vectors or argmax integers
         self.label_one_hot = label_one_hot
 
@@ -153,7 +158,9 @@ class BCE_accuracy(Accuracy):
         pass
 
     def compare(self, input, label):
-        pass
+        comparison = input == label
+        
+        return comparison
 
 class Loss():
     def regularization_loss(self, weight_layer_list):
@@ -256,16 +263,9 @@ class BCE_loss(Loss):
         self.input_clipped = np.clip(self.inputs, 1e-7, 1-1e-7)
 
         self.loss_per_sample = self.labels * -np.log(self.input_clipped) + (1 - self.labels) * -np.log(1 - self.input_clipped)
-        self.output = np.mean(self.loss_per_sample, axis=-1)
+        self.loss = np.mean(self.loss_per_sample, axis=-1)
 
-        boolean_outputs = (self.inputs > 0.5) * 1 #get a boolean array of True and False
-
-        self.accuracy = np.mean(boolean_outputs == self.labels)
-        self.loss = self.output
-
-        return self.loss, self.accuracy
-
-        #get accuracy
+        return self.loss
 
     def backward(self, gradients, labels):
         #clip incoming gradients
@@ -572,6 +572,48 @@ class Model():
         
         pass
 
+#download the data if data is not already in the download folder
+url = 'https://nnfs.io/datasets/fashion_mnist_images.zip'
+file = 'fashion_mnist_images.zip'
+folder = 'fashion_mnist_images'
+
+#data pre-preocessing
+if not os.path.isfile(path=file):
+    print('Downlaoding file')
+    urllib.request.urlretrieve(url=url, filename=file)
+
+else:
+    print('File already downloaded')
+
+with ZipFile(file=file) as zip_images:
+    zip_images.extractall(folder)
+
+    
+'''BINARY CROSS-ENTROPY REGRESSION'''
+# x, y = spiral_data(samples=100, classes=2)
+
+# y = y.reshape(-1, 1)
+
+# #model definition
+# model = Model()
+
+# model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Dropout(keep_rate=0.9))
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Dropout(keep_rate=0.9))
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
+# model.add(layer=Sigmoid())
+
+# model.set(loss_function=BCE_loss(), 
+#           accuracy_function=BCE_accuracy(), 
+#           optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
+
+# model.finalise()
+
+# model.train(epochs=10001, data=x, labels=y)
+
 # '''REGRESSION'''
 # x, y = sine_data()
 
@@ -594,52 +636,31 @@ class Model():
 # model.train(epochs=10001, data=x, labels=y)
 
 '''CCE CLASSIFICATION'''
-x, y = spiral_data(samples=100, classes=3)
+# x, y = spiral_data(samples=100, classes=3)
 
-x_val, y_val = spiral_data(samples=100, classes=3)
+# x_val, y_val = spiral_data(samples=100, classes=3)
 
-validation_data = x_val, y_val
-
-#model definition
-model = Model()
-
-model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
-model.add(layer=ReLU())
-model.add(layer=Dropout(keep_rate=0.9))
-model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
-model.add(layer=ReLU())
-model.add(layer=Dropout(keep_rate=0.9))
-model.add(layer=Layer(nr_inputs=64, nr_neurons=3))
-model.add(layer=Softmax())
-
-model.set(loss_function=CCE_loss(), 
-          accuracy_function=CCE_accuracy(label_one_hot=False), 
-          optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
-
-model.finalise()
-
-model.train(epochs=10001, data=x, labels=y, validation_data=validation_data)
-
-# '''BINARY CROSS-ENTROPY REGRESSION''' #TBC
-# x, y = spiral_data(samples=100, classes=2)
+# validation_data = x_val, y_val
 
 # #model definition
 # model = Model()
 
-# model.add(layer=Layer(nr_inputs=1, nr_neurons=64))
+# model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
 # model.add(layer=ReLU())
+# model.add(layer=Dropout(keep_rate=0.9))
 # model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
 # model.add(layer=ReLU())
-# model.add(layer=Layer(nr_inputs=64, nr_neurons=1))
-# model.add(layer=Sigmoid)
+# model.add(layer=Dropout(keep_rate=0.9))
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=3))
+# model.add(layer=Softmax())
 
-# model.set(loss_function=BCE_loss(), 
-#           accuracy_function=BCE_accuracy(), 
-#           optimizer=Optimizer_Adam(learning_rate=0.005, decay=1e-3))
+# model.set(loss_function=CCE_loss(), 
+#           accuracy_function=CCE_accuracy(label_one_hot=False), 
+#           optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
 
 # model.finalise()
 
-# model.train(epochs=10001, data=x, labels=y)
+# model.train(epochs=10001, data=x, labels=y, validation_data=validation_data)
 
 '''CLASSIFICATION'''
 # #define the dataset
