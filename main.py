@@ -1,9 +1,10 @@
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import nnfs
 import os
 import urllib
 import urllib.request
+import cv2
 
 from nnfs.datasets import spiral_data, sine_data
 from zipfile import ZipFile
@@ -577,18 +578,94 @@ url = 'https://nnfs.io/datasets/fashion_mnist_images.zip'
 file = 'fashion_mnist_images.zip'
 folder = 'fashion_mnist_images'
 
-#data pre-preocessing
+#data download
 if not os.path.isfile(path=file):
     print('Downlaoding file')
     urllib.request.urlretrieve(url=url, filename=file)
 
+    with ZipFile(file=file) as zip_images:
+        zip_images.extractall(folder)
+
 else:
-    print('File already downloaded')
+    print('File already downloaded and extracted')
 
-with ZipFile(file=file) as zip_images:
-    zip_images.extractall(folder)
+#inspecting data
+# print('getting sample ready')
+# sample_image = cv2.imread('fashion_mnist_images/train/1/0001.png')
 
-    
+# print(sample_image)
+# plt.imshow(sample_image)
+# plt.show()
+
+#sort the data into test and train
+
+
+#add train images and labels
+def image_data_loading(data_path):
+    x = []
+    y = []
+
+    x_test = []
+    y_test = []
+
+    for label in os.listdir(os.path.join(data_path, 'train')):
+        for sample_path in os.listdir(os.path.join(data_path, 'train', label)):
+            image = cv2.imread(os.path.join(data_path, 'train', label, sample_path), cv2.IMREAD_UNCHANGED)
+
+            x.append(image)
+            y.append(label)
+    print('finished training data processing')
+
+    for label_test in os.listdir(os.path.join(data_path, 'test')):
+        for sample_test_path in os.listdir(os.path.join(data_path, 'test', label_test)):
+            image_test = cv2.imread(os.path.join(data_path, 'test', label_test, sample_test_path), cv2.IMREAD_UNCHANGED)
+
+            x_test.append(image_test)
+            y_test.append(label_test)
+        
+    print('finished test data processing')
+
+    print(f'training samples: {len(x)}')
+    print(f'training lables: {len(y)}')
+
+    print(f'test samples: {len(x_test)}')
+    print(f'test labels: {len(y_test)}')
+
+    x = np.array(x).astype('uint8')
+    y = np.array(y).astype('uint8')
+
+    x_test = np.array(x_test).astype('uint8')
+    y_test = np.array(y_test).astype('uint8')
+
+    keys_train = np.array(range(x.shape[0]))
+    keys_test = np.array(range(x_test.shape[0]))
+
+    np.random.shuffle(keys_train)
+    np.random.shuffle(keys_test)
+
+    x = x[keys_train]
+    y = y[keys_train]
+
+    x_test = x_test[keys_test]
+    y_test = y_test[keys_test]
+
+    return x, y, x_test, y_test
+
+#data pre-processing
+def image_processing(data):
+    #take the data and resize it
+    resized_data = (data.astype(np.float32) - 127.5) / 127.5
+    reshape_data = (resized_data.reshape(resized_data.shape[0], -1))
+    print(f'Output data shape: {reshape_data.shape}')
+    return reshape_data
+
+x, y, x_test, y_test = image_data_loading(data_path=folder)
+
+plt.imshow(x[1])
+plt.show()
+
+x = image_processing(x)
+
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
 
