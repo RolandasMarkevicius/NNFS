@@ -485,56 +485,117 @@ class Model():
             for layer in reversed(self.layer_list):
                 layer.backward(layer.next.gradients)
 
-    def validate(self, x_val, y_val):
-        pass
-
-    def train(self, epochs, data, labels, validation_data=None):
+    def train(self, data, labels, *, batch_size=None, epochs=1, validation_data=None, include_reg_loss=False):
         self.accuracy_function.init(labels)
 
+        #partition the full training set by the batch count
+        steps = data.shape[0] // batch_size
+
+        #include any data that is not accounted in integer division
+        if steps * batch_size < data.shape[0]:
+            steps += 1
+
+        #itterate through the partitioned list 
         for epoch in range(epochs):
-            #forward pass
-            self.network_output = self.forward(data=data)
-            
-            #loss calculation
-            self.forward_loss, self.reg_loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
-            self.total_loss = self.forward_loss + self.reg_loss
+            #reset the epoch loss, accuracy & step count
+            self.epoch_accumulated_loss = 0
+            self.epoch_accumulated_accuracy = 0
+            self.epoch_steps = 0
 
-            #accuracy calculation
-            self.predictions = self.last_activation_function.prediction(self.network_output)
-            self.accuracy = self.accuracy_function.calculate(self.predictions, labels)
-            
-            #backward pass
-            self.backward(input=self.network_output, label=labels)
+            for step in range(steps):
+                batch_data = data[step*batch_size:(step+1)*batch_size]
+                batch_labels = labels[step*batch_size:(step+1)*batch_size]
 
-            #optimization
-            self.optimizer.pre_optimize()
-            for layer in self.weight_layer_list:
-                self.optimizer.optimize(layer)
-            self.optimizer.post_optimize()
+                #forward pass
+                self.network_output = self.forward(data=batch_data)
+                
+                #loss calculation
+                self.forward_loss, self.reg_loss = self.loss_function.calculate(self.network_output, batch_labels, self.weight_layer_list)
+                self.total_loss = self.forward_loss + self.reg_loss
 
-            print(f'Epoch: {epoch}',
-                  f'Total Loss: {self.total_loss}',
-                  f'Accuracy: {self.accuracy}',
-                  f'lr: {self.optimizer.current_learning_rate}'
-                  )
-            
+                #print(self.total_loss)
+
+                #accuracy calculation
+                self.predictions = self.last_activation_function.prediction(self.network_output)
+                self.accuracy = self.accuracy_function.calculate(self.predictions, batch_labels)
+                
+                #backward pass
+                self.backward(input=self.network_output, label=batch_labels)
+
+                #optimization
+                self.optimizer.pre_optimize()
+                for layer in self.weight_layer_list:
+                    self.optimizer.optimize(layer)
+                self.optimizer.post_optimize()
+                
+                #print the current loss & accuracy
+                print(f'Step: {step}',
+                    f'Total Loss: {self.total_loss}',
+                    f'Accuracy: {self.accuracy}',
+                    f'lr: {self.optimizer.current_learning_rate}'
+                    )
+                
+                #accumulate loss & accuracy for the epoch loss & accuracy
+                if include_reg_loss:
+                    self.epoch_accumulated_loss += self.total_loss
+                    self.epoch_accumulated_accuracy += self.accuracy
+                else:
+                    self.epoch_accumulated_loss += self.forward_loss
+                    self.epoch_accumulated_accuracy += self.accuracy
+                self.epoch_steps += 1
+
+            #calculate average epoch loss and accuracy
+            self.epoch_avg_loss = self.epoch_accumulated_loss / self.epoch_steps
+            self.epoch_avg_accuracy = self.epoch_accumulated_accuracy / self.epoch_steps
+
+            #print the current epoch loss and accuracy
+            print(f'Currwent Epoch: {epoch}',
+                  f'Current Epoch Loss: {self.epoch_avg_loss}',
+                  f'Current Epoch Accuracy: {self.epoch_avg_accuracy}')
+
         #run validation at the end of the training run
         if validation_data is not None:
             x_val, y_val = validation_data
 
-            #forward pass
-            self.val_output = self.forward(data=x_val)
+            #partition the full training set by the batch count
+            val_steps = x_val.shape[0] // batch_size
 
-            #loss calculation
-            self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val, self.weight_layer_list)
+            #include any data that is not accounted in integer division
+            if val_steps * batch_size < x_val.shape[0]:
+                val_steps += 1
 
-            #accuracy calculation
-            self.val_predictions = self.last_activation_function.prediction(self.val_output)
-            self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val)
+            #set a 0 validation step counter
+            val_step_count = 0
+            self.val_accumulated_loss = 0
+            self.val_accumulated_accuracy = 0
 
-            print(f'Validation Loss: {self.val_forward_loss}',
-                  f'Validation Accuracy: {self.val_accuracy}'
-                  )
+            for step in range(val_steps):
+                x_val_step = x_val[step*batch_size:(step+1)*batch_size]
+                y_val_step = y_val[step*batch_size:(step+1)*batch_size]
+
+                #forward pass
+                self.val_output = self.forward(data=x_val_step)
+
+                #loss calculation
+                self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_step, self.weight_layer_list)
+
+                #accuracy calculation
+                self.val_predictions = self.last_activation_function.prediction(self.val_output)
+                self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val_step)
+
+                #accumulate loss, accuracy and steps
+                self.val_accumulated_loss += self.val_forward_loss
+                self.val_accumulated_accuracy += self.val_accuracy
+                val_step_count += 1
+
+            #average validation loss & accuracy
+            self.avg_val_loss = self.val_accumulated_loss / val_step_count
+            self.avg_val_accuracy = self.val_accumulated_accuracy / val_step_count
+
+            #print validation loss & accuracy
+            print(f'Validation Loss: {self.avg_val_loss}',
+                f'Validation Accuracy: {self.avg_val_accuracy}'
+                )
 
     def inference(self):
         # #omit the dropoutlayers somehow
@@ -573,34 +634,7 @@ class Model():
         
         pass
 
-#download the data if data is not already in the download folder
-url = 'https://nnfs.io/datasets/fashion_mnist_images.zip'
-file = 'fashion_mnist_images.zip'
-folder = 'fashion_mnist_images'
-
-#data download
-if not os.path.isfile(path=file):
-    print('Downlaoding file')
-    urllib.request.urlretrieve(url=url, filename=file)
-
-    with ZipFile(file=file) as zip_images:
-        zip_images.extractall(folder)
-
-else:
-    print('File already downloaded and extracted')
-
-#inspecting data
-# print('getting sample ready')
-# sample_image = cv2.imread('fashion_mnist_images/train/1/0001.png')
-
-# print(sample_image)
-# plt.imshow(sample_image)
-# plt.show()
-
-#sort the data into test and train
-
-
-#add train images and labels
+#add train images and labels - shuffles the data and oputputs training and test sample and label lists
 def image_data_loading(data_path):
     x = []
     y = []
@@ -651,20 +685,57 @@ def image_data_loading(data_path):
 
     return x, y, x_test, y_test
 
-#data pre-processing
-def image_processing(data):
+#data pre-processing - remap
+def data_remapping(data):
     #take the data and resize it
     resized_data = (data.astype(np.float32) - 127.5) / 127.5
     reshape_data = (resized_data.reshape(resized_data.shape[0], -1))
     print(f'Output data shape: {reshape_data.shape}')
     return reshape_data
 
+#download the data if data is not already in the download folder
+url = 'https://nnfs.io/datasets/fashion_mnist_images.zip'
+file = 'fashion_mnist_images.zip'
+folder = 'fashion_mnist_images'
+
+#data download
+if not os.path.isfile(path=file):
+    print('Downlaoding file')
+    urllib.request.urlretrieve(url=url, filename=file)
+
+    with ZipFile(file=file) as zip_images:
+        zip_images.extractall(folder)
+
+else:
+    print('File already downloaded and extracted')
+
 x, y, x_test, y_test = image_data_loading(data_path=folder)
 
-plt.imshow(x[1])
-plt.show()
+x = data_remapping(x)
+x_test = data_remapping(x_test)
 
-x = image_processing(x)
+'''CCE CLASSIFICATION'''
+validation_data = x_test, y_test
+
+#model definition
+model = Model()
+
+model.add(layer=Layer(nr_inputs=784, nr_neurons=64))
+model.add(layer=ReLU())
+model.add(layer=Dropout(keep_rate=0.9))
+model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+model.add(layer=ReLU())
+model.add(layer=Dropout(keep_rate=0.9))
+model.add(layer=Layer(nr_inputs=64, nr_neurons=10))
+model.add(layer=Softmax())
+
+model.set(loss_function=CCE_loss(), 
+          accuracy_function=CCE_accuracy(label_one_hot=False), 
+          optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
+
+model.finalise()
+
+model.train(data=x, labels=y, epochs=5, batch_size=128, validation_data=validation_data)
 
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
@@ -711,231 +782,3 @@ x = image_processing(x)
 # model.finalise()
 
 # model.train(epochs=10001, data=x, labels=y)
-
-'''CCE CLASSIFICATION'''
-# x, y = spiral_data(samples=100, classes=3)
-
-# x_val, y_val = spiral_data(samples=100, classes=3)
-
-# validation_data = x_val, y_val
-
-# #model definition
-# model = Model()
-
-# model.add(layer=Layer(nr_inputs=2, nr_neurons=64))
-# model.add(layer=ReLU())
-# model.add(layer=Dropout(keep_rate=0.9))
-# model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
-# model.add(layer=ReLU())
-# model.add(layer=Dropout(keep_rate=0.9))
-# model.add(layer=Layer(nr_inputs=64, nr_neurons=3))
-# model.add(layer=Softmax())
-
-# model.set(loss_function=CCE_loss(), 
-#           accuracy_function=CCE_accuracy(label_one_hot=False), 
-#           optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
-
-# model.finalise()
-
-# model.train(epochs=10001, data=x, labels=y, validation_data=validation_data)
-
-'''CLASSIFICATION'''
-# #define the dataset
-# x, y = spiral_data(samples=100, classes=3)
-
-# #network architecture
-# l1 = Layer(2,512, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
-# l1_relu = Activation()
-# l1_dropout = Dropout(dropout_rate=0.9)
-# l2 = Layer(512,3)
-# l2_softmax = Softmax()
-
-# # loss_function = CCE_loss()
-# smax_and_cce = Combined_Softamx_and_CCE()
-
-# #optimizer
-# optimizer = Optimizer_Adam(learning_rate=0.05, decay=5e-5, eps=1e-7, beta1=0.9, beta2=0.999)
-
-# #training loop
-# for i in range(10001):
-
-#     #forward pass
-#     l1.forward(x)
-#     l1_relu.forward(l1.output)
-#     l1_dropout.forward(l1_relu.output)
-
-#     l2.forward(l1_dropout.output)
-#     smax_and_cce.forward(l2.output, y)
-
-#     #loss
-#     data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
-#     regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
-
-#     loss = data_loss + regularization_loss
-#     print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
-
-#     #backwards pass
-#     smax_and_cce.backward(softmax_outputs=smax_and_cce.output, labels=y)
-#     l2.backward(gradients=smax_and_cce.gradients)
-
-#     l1_dropout.backward(gradients=l2.gradients)
-#     l1_relu.backward(gradients=l1_dropout.gradients)
-#     l1.backward(gradients=l1_relu.gradients)
-
-#     #optimization
-#     optimizer.pre_optimize()
-#     optimizer.optimize(layer=l1)
-#     optimizer.optimize(layer=l2)
-#     optimizer.post_optimize()
-    
-# #model validation
-# x_test, y_test = spiral_data(samples=100, classes=3)
-
-# #forward pass
-# l1.forward(x_test)
-# l1_relu.forward(l1.output)
-
-# l2.forward(l1_relu.output)
-# smax_and_cce.forward(l2.output, y_test)
-
-# #loss
-# data_loss, accracy = smax_and_cce.loss_value, smax_and_cce.accuracy_value
-# regularization_loss = smax_and_cce.loss.regularization_loss(l1) + smax_and_cce.loss.regularization_loss(l2)
-
-# loss = data_loss + regularization_loss
-# print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
-
-'''BINARY CROSS-ENTROPY REGRESSION'''
-# #define the dataset
-# x, y = spiral_data(samples=100, classes=2)
-
-# y = y.reshape(-1, 1)
-
-# #network architecture
-# l1 = Layer(2, 64, l2_lambda_weights=5e-4, l2_lambda_bias=5e-4)
-# l1_relu = Activation()
-# l1_dropout = Dropout(dropout_rate=0.9)
-# l2 = Layer(64, 1)
-# l2_sigmoid = Sigmoid()
-
-# # loss_function = CCE_loss()
-# loss_bce = BCE_loss()
-
-# #optimizer
-# optimizer = Optimizer_Adam(decay=5e-7)
-
-# #training loop
-# for i in range(10001):
-
-#     #forward pass
-#     l1.forward(x)
-#     l1_relu.forward(l1.output)
-#     #l1_dropout.forward(l1_relu.output)
-
-#     l2.forward(l1_relu.output)
-#     l2_sigmoid.forward(l2.output)
-#     avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y)
-
-#     #loss
-#     data_loss, accracy = avg_loss, avg_acc
-#     regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
-
-#     loss = data_loss + regularization_loss
-#     print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
-
-#     #backwards pass
-#     loss_bce.backward(gradients=l2_sigmoid.output, labels=y)
-#     l2_sigmoid.backward(gradients=loss_bce.d_loss)
-#     l2.backward(gradients=l2_sigmoid.d_sigmoid)
-
-#     #l1_dropout.backward(gradients=l2.gradients)
-#     l1_relu.backward(gradients=l2.gradients)
-#     l1.backward(gradients=l1_relu.gradients)
-
-#     #optimization
-#     optimizer.pre_optimize()
-#     optimizer.optimize(layer=l1)
-#     optimizer.optimize(layer=l2)
-#     optimizer.post_optimize()
-    
-# #model validation
-# x_test, y_test = spiral_data(samples=100, classes=2)
-
-# y_test = y.reshape(-1, 1)
-
-# #forward pass
-# l1.forward(x_test)
-# l1_relu.forward(l1.output)
-
-# l2.forward(l1_relu.output)
-# l2_sigmoid.forward(l2.output)
-# avg_loss, avg_acc = loss_bce.calculate(input=l2_sigmoid.output, labels=y_test)
-
-# #loss
-# data_loss, accracy = avg_loss, avg_acc
-# regularization_loss = loss_bce.regularization_loss(l1) + loss_bce.regularization_loss(l2)
-
-# loss = data_loss + regularization_loss
-# print(f'Data Loss: {data_loss}, Reg Loss: {regularization_loss}, Total Loss: {loss}, Accuracy: {accracy}')
-
-'''REGRESSION'''
-# #data
-# x, y = sine_data()
-
-# #network architecture
-# l1 = Layer(1, 64)
-# l1_relu = ReLU()
-# # l1_dropout = Dropout(dropout_rate=0.9)
-# l2 = Layer(64, 64)
-# l2_relu = ReLU()
-# l3 = Layer(64, 1)
-# l3_linear = Linear()
-
-# # loss_function = CCE_loss()
-# loss_mse = MSE_loss()
-
-# #optimizer
-# optimizer = Optimizer_Adam(learning_rate=0.005, decay=1e-3)
-
-# #training
-# for epoch in range(10000):
-#     #forward pass
-#     l1.forward(inputs=x)
-#     l1_relu.forward(l1.output)
-#     # l1_dropout.forward(l1_relu.output)
-
-#     l2.forward(l1_relu.output)
-#     l2_relu.forward(l2.output)
-
-#     l3.forward(l2_relu.output)
-#     l3_linear.forward(l3.output)
-
-#     loss_mse.forward(input=l3_linear.output, label=y)
-
-#     #calculate loss
-#     avg_loss, accuracy = loss_mse.calculate(input=l3_linear.output, labels=y)
-#     reg_loss = loss_mse.regularization_loss(l1) + loss_mse.regularization_loss(l2) + loss_mse.regularization_loss(l3)
-#     total_loss = avg_loss + reg_loss
-
-#     #backward pass
-#     loss_mse.backward(input=l3_linear.output, label=y)
-#     l3_linear.backward(gradients=loss_mse.d_loss)
-#     l3.backward(gradients=l3_linear.d_linear)
-
-#     l2_relu.backward(gradients=l3.gradients)
-#     l2.backward(gradients=l2_relu.d_relu)
-
-#     # l1_dropout.backward(gradients=l2.gradients)
-#     l1_relu.backward(gradients=l2.gradients)
-#     l1.backward(gradients=l1_relu.d_relu)
-
-#     #optimization
-#     optimizer.pre_optimize()
-#     optimizer.optimize(layer=l1)
-#     optimizer.optimize(layer=l2)
-#     optimizer.optimize(layer=l3)
-#     optimizer.post_optimize()
-
-#     print(f'Data Loss: {avg_loss}, Reg Loss: {reg_loss}, Total Loss: {total_loss}, Accuracy: {accuracy}')
-
-#validation
