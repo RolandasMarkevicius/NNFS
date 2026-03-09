@@ -21,7 +21,7 @@ class Layer():
         self.l1_lambda_bias = l1_lambda_bias
         self.l2_lambda_bias = l2_lambda_bias
 
-    def forward(self, inputs):
+    def forward(self, inputs, train):
         self.inputs = inputs
         self.output = np.dot(self.inputs, self.weights) + self.bias
 
@@ -56,23 +56,33 @@ class Layer():
         #return outputs for further backpropagation
         self.gradients = np.dot(gradients, self.weights.T)
 
+    def get_parameters(self):
+        return self.weights, self.bias
+    
+    def set_parameters(self, weights, biases):
+        self.weights = weights
+        self.biases = biases
+
 class Init_layer():
-    def forward(self, input):
+    def forward(self, input, train):
         self.output = input
 
 class Dropout():
     def __init__(self, keep_rate):
         self.keep_rate = keep_rate
     
-    def forward(self, inputs):
-        self.binary_mask = np.random.binomial(1, self.keep_rate, np.shape(inputs))
-        self.output = inputs * self.binary_mask / self.keep_rate
+    def forward(self, inputs, train=True):
+        if not train:
+            self.output = inputs
+        else:
+            self.binary_mask = np.random.binomial(1, self.keep_rate, np.shape(inputs))
+            self.output = inputs * self.binary_mask / self.keep_rate
 
     def backward(self, gradients):
         self.gradients = gradients * self.binary_mask / self.keep_rate
 
 class Linear():
-    def forward(self, input):
+    def forward(self, input, train):
         self.output = input
 
     def backward(self, gradients):
@@ -82,7 +92,7 @@ class Linear():
         return outputs
 
 class ReLU():
-    def forward(self, input):
+    def forward(self, input, train):
         self.inputs = input
         self.output = np.maximum(0, input)
 
@@ -94,7 +104,7 @@ class ReLU():
         return output
 
 class Softmax():
-    def forward(self, input):
+    def forward(self, input, train):
         negative_exponents = np.exp(input - np.max(input, axis=1, keepdims=True))
         self.output = negative_exponents / np.sum(negative_exponents, axis=1, keepdims=True)
     
@@ -102,7 +112,7 @@ class Softmax():
         return np.argmax(output, axis=1)
 
 class Sigmoid():
-    def forward(self, input):
+    def forward(self, input, train):
         self.output = 1 / (1 + np.exp(-input))
 
     def backward(self, gradients):
@@ -417,18 +427,20 @@ class Model():
     def __init__(self):
         self.layer_list = []
         self.weight_layer_list = []
-        self.validation_layer_list = []
         self.softmax_cce_backward = None
 
     def add(self, layer):
         self.layer_list.append(layer)
 
-    def set(self, *, loss_function, accuracy_function, optimizer):
-        self.loss_function = loss_function
-        self.accuracy_function = accuracy_function
-        self.optimizer = optimizer
+    def set(self, *, loss_function=None, accuracy_function=None, optimizer=None):
+        if loss_function is not None:
+            self.loss_function = loss_function
 
-        print(len(self.layer_list))
+        if accuracy_function is not None:
+            self.accuracy_function = accuracy_function
+
+        if optimizer is not None:
+            self.optimizer = optimizer
 
     def finalise(self):
         for i in range(len(self.layer_list)):
@@ -451,20 +463,14 @@ class Model():
             if hasattr(layer, 'weights'):
                 self.weight_layer_list.append(layer)
 
-        #filter dropout layers for validation pass
-        for layer in self.layer_list:
-            if not isinstance(layer, Dropout):
-                print(isinstance(layer, Dropout))
-                self.validation_layer_list.append(layer)
-
         if isinstance(self.layer_list[-1], Softmax) and isinstance(self.loss_function, CCE_loss):
             self.softmax_cce_backward = Combined_Softamx_and_CCE_loss()
             
-    def forward(self, data):
-        self.init_layer.forward(data)
+    def forward(self, data, train=True):
+        self.init_layer.forward(data, train=train)
 
         for layer in self.layer_list:
-            layer.forward(layer.prev.output)
+            layer.forward(layer.prev.output, train)
 
         return layer.output #layer is now the last object in the list
 
@@ -485,6 +491,22 @@ class Model():
             for layer in reversed(self.layer_list):
                 layer.backward(layer.next.gradients)
 
+    def get_parameters(self):
+        #get the weights and biases of the model
+        model_parameters = []
+
+        for layer in self.weight_layer_list:
+            layer_parameters = layer.get_parameters()
+            model_parameters.append(layer_parameters)
+        
+        return model_parameters
+    
+    def set_parameters(self, model_parameters):
+        #itterate through the layers and parameters
+        for layer, layer_parameters in zip(self.weight_layer_list, model_parameters):
+            weights, biases = layer_parameters
+            layer.set_parameters(weights, biases)
+
     def validation(self, data, labels, batch_size=None):
         #partition the full training set by the batch count
         val_steps = data.shape[0] // batch_size
@@ -503,7 +525,7 @@ class Model():
             y_val_step = labels[step*batch_size:(step+1)*batch_size]
 
             #forward pass
-            self.val_output = self.forward(data=x_val_step)
+            self.val_output = self.forward(data=x_val_step, train=False)
 
             #loss calculation
             self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_step, self.weight_layer_list)
@@ -548,7 +570,7 @@ class Model():
                 batch_labels = labels[step*batch_size:(step+1)*batch_size]
 
                 #forward pass
-                self.network_output = self.forward(data=batch_data)
+                self.network_output = self.forward(data=batch_data, train=True)
                 
                 #loss calculation
                 self.forward_loss, self.reg_loss = self.loss_function.calculate(self.network_output, batch_labels, self.weight_layer_list)
@@ -736,6 +758,29 @@ model.train(data=x, labels=y, epochs=5, batch_size=128)
 
 model.validation(data=x_test, labels=y_test, batch_size=128)
 
+parameters = model.get_parameters()
+
+#2nd model for testing parameter loading
+print('working on 2nd model')
+model2 = Model()
+
+model2.add(layer=Layer(nr_inputs=784, nr_neurons=64))
+model2.add(layer=ReLU())
+model2.add(layer=Dropout(keep_rate=0.9))
+model2.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+model2.add(layer=ReLU())
+model2.add(layer=Dropout(keep_rate=0.9))
+model2.add(layer=Layer(nr_inputs=64, nr_neurons=10))
+model2.add(layer=Softmax())
+
+model2.set(loss_function=CCE_loss(), 
+          accuracy_function=CCE_accuracy(label_one_hot=False))
+
+model2.finalise()
+
+model2.set_parameters(model_parameters=parameters)
+
+model2.validation(data=x_test, labels=y_test, batch_size=128)
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
 
