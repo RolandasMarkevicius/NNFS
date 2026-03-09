@@ -485,7 +485,48 @@ class Model():
             for layer in reversed(self.layer_list):
                 layer.backward(layer.next.gradients)
 
-    def train(self, data, labels, *, batch_size=None, epochs=1, validation_data=None, include_reg_loss=False):
+    def validation(self, data, labels, batch_size=None):
+        #partition the full training set by the batch count
+        val_steps = data.shape[0] // batch_size
+
+        #include any data that is not accounted in integer division
+        if val_steps * batch_size < data.shape[0]:
+            val_steps += 1
+
+        #set a 0 validation step counter
+        val_step_count = 0
+        self.val_accumulated_loss = 0
+        self.val_accumulated_accuracy = 0
+
+        for step in range(val_steps):
+            x_val_step = data[step*batch_size:(step+1)*batch_size]
+            y_val_step = labels[step*batch_size:(step+1)*batch_size]
+
+            #forward pass
+            self.val_output = self.forward(data=x_val_step)
+
+            #loss calculation
+            self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_step, self.weight_layer_list)
+
+            #accuracy calculation
+            self.val_predictions = self.last_activation_function.prediction(self.val_output)
+            self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val_step)
+
+            #accumulate loss, accuracy and steps
+            self.val_accumulated_loss += self.val_forward_loss
+            self.val_accumulated_accuracy += self.val_accuracy
+            val_step_count += 1
+
+        #average validation loss & accuracy
+        self.avg_val_loss = self.val_accumulated_loss / val_step_count
+        self.avg_val_accuracy = self.val_accumulated_accuracy / val_step_count
+
+        #print validation loss & accuracy
+        print(f'Validation Loss: {self.avg_val_loss}',
+            f'Validation Accuracy: {self.avg_val_accuracy}'
+            )
+
+    def train(self, data, labels, *, batch_size=None, epochs=1, include_reg_loss=False):
         self.accuracy_function.init(labels)
 
         #partition the full training set by the batch count
@@ -549,53 +590,9 @@ class Model():
             self.epoch_avg_accuracy = self.epoch_accumulated_accuracy / self.epoch_steps
 
             #print the current epoch loss and accuracy
-            print(f'Currwent Epoch: {epoch}',
+            print(f'Current Epoch: {epoch}',
                   f'Current Epoch Loss: {self.epoch_avg_loss}',
                   f'Current Epoch Accuracy: {self.epoch_avg_accuracy}')
-
-        #run validation at the end of the training run
-        if validation_data is not None:
-            x_val, y_val = validation_data
-
-            #partition the full training set by the batch count
-            val_steps = x_val.shape[0] // batch_size
-
-            #include any data that is not accounted in integer division
-            if val_steps * batch_size < x_val.shape[0]:
-                val_steps += 1
-
-            #set a 0 validation step counter
-            val_step_count = 0
-            self.val_accumulated_loss = 0
-            self.val_accumulated_accuracy = 0
-
-            for step in range(val_steps):
-                x_val_step = x_val[step*batch_size:(step+1)*batch_size]
-                y_val_step = y_val[step*batch_size:(step+1)*batch_size]
-
-                #forward pass
-                self.val_output = self.forward(data=x_val_step)
-
-                #loss calculation
-                self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_step, self.weight_layer_list)
-
-                #accuracy calculation
-                self.val_predictions = self.last_activation_function.prediction(self.val_output)
-                self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val_step)
-
-                #accumulate loss, accuracy and steps
-                self.val_accumulated_loss += self.val_forward_loss
-                self.val_accumulated_accuracy += self.val_accuracy
-                val_step_count += 1
-
-            #average validation loss & accuracy
-            self.avg_val_loss = self.val_accumulated_loss / val_step_count
-            self.avg_val_accuracy = self.val_accumulated_accuracy / val_step_count
-
-            #print validation loss & accuracy
-            print(f'Validation Loss: {self.avg_val_loss}',
-                f'Validation Accuracy: {self.avg_val_accuracy}'
-                )
 
     def inference(self):
         # #omit the dropoutlayers somehow
@@ -735,7 +732,9 @@ model.set(loss_function=CCE_loss(),
 
 model.finalise()
 
-model.train(data=x, labels=y, epochs=5, batch_size=128, validation_data=validation_data)
+model.train(data=x, labels=y, epochs=5, batch_size=128)
+
+model.validation(data=x_test, labels=y_test, batch_size=128)
 
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
