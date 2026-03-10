@@ -5,9 +5,12 @@ import os
 import urllib
 import urllib.request
 import cv2
+import pickle
+import copy
+from zipfile import ZipFile
 
 from nnfs.datasets import spiral_data, sine_data
-from zipfile import ZipFile
+
 
 nnfs.init()
 
@@ -547,6 +550,48 @@ class Model():
         print(f'Validation Loss: {self.avg_val_loss}',
             f'Validation Accuracy: {self.avg_val_accuracy}'
             )
+        
+    def save_parameters(self, path):
+        #get parameters
+        model_parameters = self.get_parameters()
+        
+        #save the parameters in a file
+        with open(path, 'wb') as f:
+            pickle.dump(model_parameters, f)
+
+    def load_parameters(self, path):
+        #open the file with the model parameters
+        with open(path, 'rb') as f:
+            self.set_parameters(pickle.load(file=f))
+
+    def save(self, path):
+        #make a deep copy of the model
+        model_copy = copy.deepcopy(self)
+
+        #remove accumulated loss and accuracy
+        model_copy.epoch_accumulated_loss = 0
+        model_copy.epoch_accumulated_accuracy = 0
+        model_copy.epoch_steps = 0
+
+        #remove input data and reset the gradients
+        model_copy.init_layer.__dict__.pop('output', None)
+        model_copy.loss_function.__dict__.pop('gradients', None)
+
+        #remove properties from all the layers
+        for layer in self.layer_list:
+            for property in ['inputs', 'output', 'gradients', 'd_weights', 'd_bias']:
+                layer.__dict__.pop(property, None)
+
+        with open(path, 'wb') as f:
+            pickle.dump(model_copy, f)
+
+    @staticmethod
+    def load(path):
+        #load the model from a file in the path
+        with open(path, 'rb') as f:
+            model = pickle.load(f)
+
+        return model
 
     def train(self, data, labels, *, batch_size=None, epochs=1, include_reg_loss=False):
         self.accuracy_function.init(labels)
@@ -781,6 +826,16 @@ model2.finalise()
 model2.set_parameters(model_parameters=parameters)
 
 model2.validation(data=x_test, labels=y_test, batch_size=128)
+model2.validation(data=x_test, labels=y_test, batch_size=128)
+
+model2.save_parameters('model_parameters.parms')
+
+model2.save('fashion_mnist.model')
+
+model3 = Model.load(path='fashion_mnist.model')
+
+model3.validation(data=x_test, labels=y_test, batch_size=128)
+
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
 
