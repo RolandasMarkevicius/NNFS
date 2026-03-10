@@ -524,18 +524,24 @@ class Model():
         self.val_accumulated_accuracy = 0
 
         for step in range(val_steps):
-            x_val_step = data[step*batch_size:(step+1)*batch_size]
-            y_val_step = labels[step*batch_size:(step+1)*batch_size]
+
+            if batch_size is None:
+                x_val_batch = data
+                y_val_batch = labels
+
+            else:
+                x_val_batch = data[step*batch_size:(step+1)*batch_size]
+                y_val_batch = labels[step*batch_size:(step+1)*batch_size]
 
             #forward pass
-            self.val_output = self.forward(data=x_val_step, train=False)
+            self.val_output = self.forward(data=x_val_batch, train=False)
 
             #loss calculation
-            self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_step, self.weight_layer_list)
+            self.val_forward_loss, self.val_reg_loss = self.loss_function.calculate(self.val_output, y_val_batch, self.weight_layer_list)
 
             #accuracy calculation
             self.val_predictions = self.last_activation_function.prediction(self.val_output)
-            self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val_step)
+            self.val_accuracy = self.accuracy_function.calculate(self.val_predictions, y_val_batch)
 
             #accumulate loss, accuracy and steps
             self.val_accumulated_loss += self.val_forward_loss
@@ -611,8 +617,14 @@ class Model():
             self.epoch_steps = 0
 
             for step in range(steps):
-                batch_data = data[step*batch_size:(step+1)*batch_size]
-                batch_labels = labels[step*batch_size:(step+1)*batch_size]
+
+                if batch_size is None:
+                    batch_data = data
+                    batch_labels = labels
+
+                else:
+                    batch_data = data[step*batch_size:(step+1)*batch_size]
+                    batch_labels = labels[step*batch_size:(step+1)*batch_size]
 
                 #forward pass
                 self.network_output = self.forward(data=batch_data, train=True)
@@ -661,42 +673,37 @@ class Model():
                   f'Current Epoch Loss: {self.epoch_avg_loss}',
                   f'Current Epoch Accuracy: {self.epoch_avg_accuracy}')
 
-    def inference(self):
-        # #omit the dropoutlayers somehow
-        # self.accuracy_function.init(y_val)
+    def inference(self, input, batch_size=None):
+        #get the number of steps required
+        steps = 1
+        prediction_list = []
 
-        # self.init_layer.forward(x_val)
+        if batch_size is not None:
+            steps = input.shape[0] // batch_size
 
-        # for layer in self.validation_layer_list:
-        #     layer.forward(layer.prev.output)
+            #include any data that is not accounted in integer division
+            if steps * batch_size < input.shape[0]:
+                steps += 1
 
-        # return layer.output #layer is now the last object in the list
+        #itterate through the steps
+        for step in range(steps):
 
-        # self.network_output = self.forward(data=x_val)
-        
-        # #loss calculation
-        # self.loss = self.loss_function.calculate(self.network_output, labels, self.weight_layer_list)
+            if batch_size is None:
+                batch_data = input
 
-        # #accuracy calculation
-        # self.predictions = self.last_activation_function.prediction(self.network_output)
-        # self.accuracy = self.accuracy_function.calculate(self.predictions, labels)
-        
-        # #backward pass
-        # self.backward(input=self.network_output, label=labels)
+            else:
+                batch_data = input[step*batch_size:(step+1)*batch_size]
 
-        # #optimization
-        # self.optimizer.pre_optimize()
-        # for layer in self.weight_layer_list:
-        #     self.optimizer.optimize(layer)
-        # self.optimizer.post_optimize()
+            #run the forward pass
+            prediction = self.forward(data=batch_data, train=False)
 
-        # print(f'Epoch: {epoch}',
-        #         f'Total Loss: {self.loss}',
-        #         f'Accuracy: {self.accuracy}',
-        #         f'lr: {self.optimizer.current_learning_rate}'
-        #         )
-        
-        pass
+            #save the outputs to a list
+            prediction_list.append(prediction)
+
+        #reshape the list so that the outputs are a stack
+        prediction_list = np.vstack(prediction_list)
+
+        return prediction_list
 
 #add train images and labels - shuffles the data and oputputs training and test sample and label lists
 def image_data_loading(data_path):
@@ -757,84 +764,136 @@ def data_remapping(data):
     print(f'Output data shape: {reshape_data.shape}')
     return reshape_data
 
+def interpret_prediction(prediction):
+    #index dictionary
+    prediction_dictionary = {0: 'T-shirt/top',
+                             1: 'Trouser',
+                             2: 'Pullover',
+                             3: 'Dress',
+                             4: 'Coat',
+                             5: 'Sandal',
+                             6: 'Shirt',
+                             7: 'Sneaker',
+                             8: 'Bag',
+                             9: 'Ankle boot'}
+    #run argmax
+    prediction_index_list = np.argmax(prediction, keepdims=True)
+
+    if len(prediction_index_list) > 1:
+        #loop over predictions
+        for prediction_index in prediction_index_list:
+            interpreted_prediction = prediction_dictionary[prediction_index]
+
+            #print interpretable output
+            print(interpreted_prediction)
+    else:
+        flat_prediction_index_list = prediction_index_list[0][0]
+        interpreted_prediction = prediction_dictionary[flat_prediction_index_list]
+        print(interpreted_prediction)
+
+        
+
 #download the data if data is not already in the download folder
 url = 'https://nnfs.io/datasets/fashion_mnist_images.zip'
 file = 'fashion_mnist_images.zip'
 folder = 'fashion_mnist_images'
 
-#data download
-if not os.path.isfile(path=file):
-    print('Downlaoding file')
-    urllib.request.urlretrieve(url=url, filename=file)
+# #data download
+# if not os.path.isfile(path=file):
+#     print('Downlaoding file')
+#     urllib.request.urlretrieve(url=url, filename=file)
 
-    with ZipFile(file=file) as zip_images:
-        zip_images.extractall(folder)
+#     with ZipFile(file=file) as zip_images:
+#         zip_images.extractall(folder)
 
-else:
-    print('File already downloaded and extracted')
+# else:
+#     print('File already downloaded and extracted')
 
-x, y, x_test, y_test = image_data_loading(data_path=folder)
+# x, y, x_test, y_test = image_data_loading(data_path=folder)
 
-x = data_remapping(x)
-x_test = data_remapping(x_test)
+# x = data_remapping(x)
+# x_test = data_remapping(x_test)
 
-'''CCE CLASSIFICATION'''
-validation_data = x_test, y_test
+# '''CCE CLASSIFICATION'''
+# validation_data = x_test, y_test
 
-#model definition
-model = Model()
+# #model definition
+# model = Model()
 
-model.add(layer=Layer(nr_inputs=784, nr_neurons=64))
-model.add(layer=ReLU())
-model.add(layer=Dropout(keep_rate=0.9))
-model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
-model.add(layer=ReLU())
-model.add(layer=Dropout(keep_rate=0.9))
-model.add(layer=Layer(nr_inputs=64, nr_neurons=10))
-model.add(layer=Softmax())
+# model.add(layer=Layer(nr_inputs=784, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Dropout(keep_rate=0.9))
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+# model.add(layer=ReLU())
+# model.add(layer=Dropout(keep_rate=0.9))
+# model.add(layer=Layer(nr_inputs=64, nr_neurons=10))
+# model.add(layer=Softmax())
 
-model.set(loss_function=CCE_loss(), 
-          accuracy_function=CCE_accuracy(label_one_hot=False), 
-          optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
+# model.set(loss_function=CCE_loss(), 
+#           accuracy_function=CCE_accuracy(label_one_hot=False), 
+#           optimizer=Optimizer_Adam(learning_rate=0.001, decay=1e-7, ))
 
-model.finalise()
+# model.finalise()
 
-model.train(data=x, labels=y, epochs=5, batch_size=128)
+# model.train(data=x, labels=y, epochs=5, batch_size=128)
 
-model.validation(data=x_test, labels=y_test, batch_size=128)
+# model.validation(data=x_test, labels=y_test, batch_size=128)
 
-parameters = model.get_parameters()
+# parameters = model.get_parameters()
 
-#2nd model for testing parameter loading
-print('working on 2nd model')
-model2 = Model()
+# #2nd model for testing parameter loading
+# print('working on 2nd model')
+# model2 = Model()
 
-model2.add(layer=Layer(nr_inputs=784, nr_neurons=64))
-model2.add(layer=ReLU())
-model2.add(layer=Dropout(keep_rate=0.9))
-model2.add(layer=Layer(nr_inputs=64, nr_neurons=64))
-model2.add(layer=ReLU())
-model2.add(layer=Dropout(keep_rate=0.9))
-model2.add(layer=Layer(nr_inputs=64, nr_neurons=10))
-model2.add(layer=Softmax())
+# model2.add(layer=Layer(nr_inputs=784, nr_neurons=64))
+# model2.add(layer=ReLU())
+# model2.add(layer=Dropout(keep_rate=0.9))
+# model2.add(layer=Layer(nr_inputs=64, nr_neurons=64))
+# model2.add(layer=ReLU())
+# model2.add(layer=Dropout(keep_rate=0.9))
+# model2.add(layer=Layer(nr_inputs=64, nr_neurons=10))
+# model2.add(layer=Softmax())
 
-model2.set(loss_function=CCE_loss(), 
-          accuracy_function=CCE_accuracy(label_one_hot=False))
+# model2.set(loss_function=CCE_loss(), 
+#           accuracy_function=CCE_accuracy(label_one_hot=False))
 
-model2.finalise()
+# model2.finalise()
 
-model2.set_parameters(model_parameters=parameters)
+# model2.set_parameters(model_parameters=parameters)
 
-model2.validation(data=x_test, labels=y_test, batch_size=128)
-model2.validation(data=x_test, labels=y_test, batch_size=128)
+# model2.validation(data=x_test, labels=y_test, batch_size=128)
+# model2.validation(data=x_test, labels=y_test, batch_size=128)
 
-model2.save_parameters('model_parameters.parms')
+# model2.save_parameters('model_parameters.parms')
 
-model2.save('fashion_mnist.model')
+# model2.save('fashion_mnist.model')
 
+#sample image
+sample_image_path = 'tshirt.png'
+
+#load the image as greyscale 1D
+sample_image = cv2.imread(sample_image_path, 0)
+
+downsized_image = cv2.resize(sample_image, dsize=(28, 28))
+
+inverted_image = 255 - downsized_image.astype(np.float32)
+
+resized_iamge = (inverted_image.astype(np.float32) - 127.5) / 127.5
+
+reshaped_image = (resized_iamge.reshape(1, -1))
+
+#load the model
 model3 = Model.load(path='fashion_mnist.model')
 
-model3.validation(data=x_test, labels=y_test, batch_size=128)
+#run the model for inference
+prediction = model3.inference(reshaped_image, 1)
+
+prediction_interpretation = interpret_prediction(prediction=prediction)
+
+#introduce a dictionary to filter the outputs
+#use argmax to get the index of the highest predicted output
+
+
 
 '''BINARY CROSS-ENTROPY REGRESSION'''
 # x, y = spiral_data(samples=100, classes=2)
